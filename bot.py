@@ -1,18 +1,23 @@
 import os
+import io
 import time
 import telebot
 import requests
 from threading import Thread
 from flask import Flask
+from PIL import Image
 
 # ==================== НАСТРОЙКИ ====================
 TELEGRAM_BOT_TOKEN = "8712152425:AAG94cYULxUTJ5lU67Reh9QDA29XZq4tZC4"
-IMGBB_API_KEY = "c08f173c3969421ad6edd1a0a8248775"
 
 # Шлюз собственного сервера Beget
 SITE_URL = "https://adis38.ru"
 SITE_API_URL = "https://adis38.ru/api_menu.php?key=adis_secret_bot_key_2026"
 SITE_MENU_URL = "https://adis38.ru/menu.json"
+
+# Прямая выгрузка фото на собственный хостинг (v1.2.1)
+SITE_UPLOAD_BOARD_URL = "https://adis38.ru/api_upload_board.php"
+UPLOAD_SECRET = "AdisMenuSecretKey_2026"
 
 ADMIN_LOGIN = "admin"
 ADMIN_PASSWORD = "11111"
@@ -153,7 +158,7 @@ def start_cmd(message):
     user_states[uid] = {"state": "LOGIN"}
     bot.send_message(
         message.chat.id,
-        "🔒 <b>Панель управления кафе «Буузная Адис» V2.6</b>\n\n"
+        "🔒 <b>Панель управления кафе «Буузная Адис» v1.2.1</b>\n\n"
         "Для работы требуется авторизация.\n"
         "Введите <b>логин</b> сотрудника:",
         parse_mode="HTML"
@@ -241,7 +246,7 @@ def handle_text_inputs(message):
         else:
             bot.send_message(message.chat.id, "❌ Ошибка сохранения на сервере. Попробуйте еще раз.")
 
-# ==================== ЗАГРУЗКА ФОТО ДОСКИ МЕНЮ ====================
+# ==================== ЗАГРУЗКА ФОТО ДОСКИ МЕНЮ НА BEGET ====================
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     uid = message.from_user.id
@@ -249,39 +254,54 @@ def handle_photo(message):
         bot.reply_to(message, "⚠️ Сначала авторизуйтесь через /start")
         return
 
-    msg = bot.reply_to(message, "⏳ Загружаю свежее фото на сервер меню...")
+    msg = bot.reply_to(message, "⏳ Сжимаю и отправляю фото на сервер adis38.ru...")
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
+        downloaded_bytes = bot.download_file(file_info.file_path)
 
-        res = requests.post(
-            "https://api.imgbb.com/1/upload",
-            params={"key": IMGBB_API_KEY},
-            files={"image": downloaded_file},
-            timeout=30
-        )
+        # 1. Сжатие и оптимизация изображения
+        img = Image.open(io.BytesIO(downloaded_bytes))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.thumbnail((1800, 1800))
+
+        output = io.BytesIO()
+        img.save(output, format="JPEG", quality=85, optimize=True)
+        compressed_bytes = output.getvalue()
+
+        # 2. Прямая отправка на Beget
+        files = {
+            'photo': ('menu_board.jpg', compressed_bytes, 'image/jpeg')
+        }
+        data = {
+            'secret': UPLOAD_SECRET
+        }
+
+        res = requests.post(SITE_UPLOAD_BOARD_URL, files=files, data=data, timeout=30)
         res_json = res.json()
 
-        if res_json.get("success"):
-            image_url = res_json["data"]["url"]
+        if res_json.get("ok"):
+            image_url = res_json.get("url")
 
+            # Обновляем URL в menu.json
             bin_data = get_bin_data()
             bin_data["image_url"] = image_url
             saved = update_bin_data(bin_data)
 
             if saved:
                 bot.edit_message_text(
-                    "✅ <b>Фотография меню успешно обновлена!</b>\n\n"
-                    "Она моментально доступна гостям на сайте и в мобильном приложении без VPN.",
+                    "✅ <b>Фотография меню успешно обновлена на сервере adis38.ru!</b>\n\n"
+                    "Она моментально доступна гостям на сайте и в PWA-приложении.",
                     chat_id=message.chat.id,
                     message_id=msg.message_id,
                     parse_mode="HTML",
                     reply_markup=main_menu_kb()
                 )
             else:
-                bot.edit_message_text("❌ Ошибка сохранения ссылки на хостинге Beget.", chat_id=message.chat.id, message_id=msg.message_id)
+                bot.edit_message_text("❌ Фото загружено, но не удалось обновить menu.json.", chat_id=message.chat.id, message_id=msg.message_id)
         else:
-            bot.edit_message_text("❌ Ошибка хостинга ImgBB. Попробуйте еще раз.", chat_id=message.chat.id, message_id=msg.message_id)
+            error_text = res_json.get("error", "Неизвестная ошибка")
+            bot.edit_message_text(f"❌ Ошибка сервера Beget: {error_text}", chat_id=message.chat.id, message_id=msg.message_id)
 
     except Exception as e:
         bot.edit_message_text(f"❌ Ошибка: {str(e)}", chat_id=message.chat.id, message_id=msg.message_id)
@@ -410,7 +430,7 @@ def handle_callbacks(call):
 
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    print("🚀 Запуск улучшенного бота «Буузная Адис» v2.6...")
+    print("🚀 Запуск улучшенного бота «Буузная Адис» v1.2.1...")
     server_thread = Thread(target=run_web)
     server_thread.daemon = True
     server_thread.start()

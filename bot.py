@@ -8,7 +8,7 @@ from flask import Flask
 from PIL import Image
 
 # ==================== НАСТРОЙКИ ====================
-TELEGRAM_BOT_TOKEN = "8712152425:AAG94cYULxUTJ5lU67Reh9QDA29XZq4tZC4"
+TELEGRAM_BOT_TOKEN = "8788396748:AAEmMaE3PtFspMjyPNJHvjCjt6qoXnHf1JY"
 
 # Шлюз собственного сервера Beget
 SITE_URL = "https://adis38.ru"
@@ -360,7 +360,6 @@ def handle_callbacks(call):
             bot.send_message(call.message.chat.id, "⚠️ Фотография меню еще не была загружена.")
         bot.answer_callback_query(call.id)
 
-    # ---------- УПРАВЛЕНИЕ ОБЪЯВЛЕНИЯМИ ----------
     elif data == "manage_announcement":
         bin_data = get_bin_data()
         current = bin_data.get("announcement", "")
@@ -500,5 +499,12 @@ if __name__ == "__main__":
     server_thread = Thread(target=run_web)
     server_thread.daemon = True
     server_thread.start()
+
+    # Сбрасываем возможные вебхуки перед запуском polling
+    try:
+        bot.remove_webhook()
+        print("🔗 Вебхук сброшен, запуск polling...")
+    except Exception as e:
+        print(f"⚠️ Ошибка удаления вебхука: {e}")
 
     bot.infinity_polling(skip_pending=True)

@@ -8,7 +8,7 @@ from flask import Flask
 from PIL import Image
 
 # ==================== НАСТРОЙКИ ====================
-TELEGRAM_BOT_TOKEN = "8788396748:AAEmMaE3PtFspMjyPNJHvjCjt6qoXnHf1JY"
+TELEGRAM_BOT_TOKEN = "8712152425:AAFrgtFyLexFis8K6rAxd5CDqXirctVCWp4"
 
 # Шлюз собственного сервера Beget
 SITE_URL = "https://adis38.ru"

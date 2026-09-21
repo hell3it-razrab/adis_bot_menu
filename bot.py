@@ -95,7 +95,7 @@ def get_bin_data():
         print(f"⚠️ Ошибка чтения меню: HTTP {r.status_code}")
     except Exception as e:
         print(f"❌ Исключение при чтении menu.json: {e}")
-    return {"image_url": "", "out_of_stock": [], "prices": {}}
+    return {"image_url": "", "out_of_stock": [], "prices": {}, "announcement": ""}
 
 def update_bin_data(data):
     headers = {
@@ -114,6 +114,7 @@ def main_menu_kb():
     kb = telebot.types.InlineKeyboardMarkup()
     kb.add(telebot.types.InlineKeyboardButton("📸 Обновить фото доски", callback_data="hint_photo"))
     kb.add(telebot.types.InlineKeyboardButton("👁 Посмотреть текущее фото", callback_data="view_photo"))
+    kb.add(telebot.types.InlineKeyboardButton("📢 Объявление на сайте", callback_data="manage_announcement"))
     kb.add(telebot.types.InlineKeyboardButton("📦 Стоп-лист (Наличие)", callback_data="categories_stock"))
     kb.add(telebot.types.InlineKeyboardButton("💰 Редактор цен", callback_data="categories_price"))
     kb.add(telebot.types.InlineKeyboardButton("🌐 Открыть витрину сайта", url=SITE_URL))
@@ -167,12 +168,15 @@ def start_cmd(message):
 def show_dashboard(chat_id, message_id=None):
     bin_data = get_bin_data()
     out_count = len(bin_data.get("out_of_stock", []))
+    cur_ann = bin_data.get("announcement", "")
+    ann_status = "📢 Активно" if cur_ann else "⚪ Нет"
     status_icon = "🟢 Витрина активна"
     
     text = (
         f"<b>Панель администратора «Буузная Адис»</b>\n\n"
         f"Статус: {status_icon}\n"
-        f"Позиций в стоп-листе: <b>{out_count}</b> шт.\n\n"
+        f"Позиций в стоп-листе: <b>{out_count}</b> шт.\n"
+        f"Объявление на сайте: <b>{ann_status}</b>\n\n"
         f"<i>Выберите нужное действие:</i>"
     )
     
@@ -184,8 +188,8 @@ def show_dashboard(chat_id, message_id=None):
             pass
     bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=main_menu_kb())
 
-# ==================== ВВОД ТЕКСТА (ЛОГИН/ПАРОЛЬ/ЦЕНА) ====================
-@bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("state") in ["LOGIN", "PASSWORD", "SET_PRICE"])
+# ==================== ВВОД ТЕКСТА (ЛОГИН/ПАРОЛЬ/ЦЕНА/ОБЪЯВЛЕНИЕ) ====================
+@bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("state") in ["LOGIN", "PASSWORD", "SET_PRICE", "SET_ANNOUNCEMENT"])
 def handle_text_inputs(message):
     uid = message.from_user.id
     state_info = user_states.get(uid, {})
@@ -246,6 +250,20 @@ def handle_text_inputs(message):
         else:
             bot.send_message(message.chat.id, "❌ Ошибка сохранения на сервере. Попробуйте еще раз.")
 
+    elif state == "SET_ANNOUNCEMENT":
+        bin_data = get_bin_data()
+        bin_data["announcement"] = text
+        if update_bin_data(bin_data):
+            user_states[uid] = {}
+            bot.send_message(
+                message.chat.id,
+                f"✅ <b>Объявление опубликовано на сайте!</b>\n\nТекст:\n«{text}»",
+                parse_mode="HTML",
+                reply_markup=main_menu_kb()
+            )
+        else:
+            bot.send_message(message.chat.id, "❌ Ошибка сохранения объявления на сервере.")
+
 # ==================== ЗАГРУЗКА ФОТО ДОСКИ МЕНЮ НА BEGET ====================
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
@@ -278,7 +296,15 @@ def handle_photo(message):
         }
 
         res = requests.post(SITE_UPLOAD_BOARD_URL, files=files, data=data, timeout=30)
-        res_json = res.json()
+        try:
+            res_json = res.json()
+        except Exception:
+            bot.edit_message_text(
+                f"❌ Сервер ответил не JSON (код {res.status_code}):\n{res.text[:150]}",
+                chat_id=message.chat.id,
+                message_id=msg.message_id
+            )
+            return
 
         if res_json.get("ok"):
             image_url = res_json.get("url")
@@ -332,6 +358,46 @@ def handle_callbacks(call):
             bot.send_photo(call.message.chat.id, img_url, caption="🖼 <b>Текущее фото меню на сайте</b>", parse_mode="HTML")
         else:
             bot.send_message(call.message.chat.id, "⚠️ Фотография меню еще не была загружена.")
+        bot.answer_callback_query(call.id)
+
+    # ---------- УПРАВЛЕНИЕ ОБЪЯВЛЕНИЯМИ ----------
+    elif data == "manage_announcement":
+        bin_data = get_bin_data()
+        current = bin_data.get("announcement", "")
+        current_display = f"<i>«{current}»</i>" if current else "<i>(сейчас отключено)</i>"
+
+        kb = telebot.types.InlineKeyboardMarkup()
+        kb.add(telebot.types.InlineKeyboardButton("✏️ Задать новый текст", callback_data="set_announcement"))
+        if current:
+            kb.add(telebot.types.InlineKeyboardButton("🗑 Отключить объявление", callback_data="clear_announcement"))
+        kb.add(telebot.types.InlineKeyboardButton("⬅️ В главное меню", callback_data="back_main"))
+
+        bot.edit_message_text(
+            f"📢 <b>Управление объявлением на сайте</b>\n\n"
+            f"Текущий баннер:\n{current_display}\n\n"
+            f"Оно отображается яркой полосой сверху всех страниц сайта с кнопкой закрытия.",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=kb
+        )
+        bot.answer_callback_query(call.id)
+
+    elif data == "clear_announcement":
+        bin_data = get_bin_data()
+        bin_data["announcement"] = ""
+        update_bin_data(bin_data)
+        bot.answer_callback_query(call.id, "✅ Объявление убрано с сайта!", show_alert=True)
+        show_dashboard(call.message.chat.id, call.message.message_id)
+
+    elif data == "set_announcement":
+        user_states[uid] = {"state": "SET_ANNOUNCEMENT"}
+        bot.send_message(
+            call.message.chat.id,
+            "✏️ Напишите в чат текст объявления для сайта:\n\n"
+            "<i>Например: Сегодня при заказе от 5 бууз морс в подарок! 🎁</i>",
+            parse_mode="HTML"
+        )
         bot.answer_callback_query(call.id)
 
     elif data == "menu_logout":

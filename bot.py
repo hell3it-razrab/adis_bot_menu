@@ -91,11 +91,29 @@ def get_bin_data():
         url = f"{SITE_MENU_URL}?t={int(time.time())}"
         r = requests.get(url, timeout=10)
         if r.status_code == 200:
-            return r.json()
+            data = r.json()
+            # Гарантируем структуру для emergency
+            if "emergency" not in data or not isinstance(data["emergency"], dict):
+                data["emergency"] = {
+                    "is_blocked": False,
+                    "block_reason": "Приём заказов временно приостановлен по техническим причинам.",
+                    "cart_warning": ""
+                }
+            return data
         print(f"⚠️ Ошибка чтения меню: HTTP {r.status_code}")
     except Exception as e:
         print(f"❌ Исключение при чтении menu.json: {e}")
-    return {"image_url": "", "out_of_stock": [], "prices": {}, "announcement": ""}
+    return {
+        "image_url": "",
+        "out_of_stock": [],
+        "prices": {},
+        "announcement": "",
+        "emergency": {
+            "is_blocked": False,
+            "block_reason": "Приём заказов временно приостановлен по техническим причинам.",
+            "cart_warning": ""
+        }
+    }
 
 def update_bin_data(data):
     headers = {
@@ -110,15 +128,36 @@ def update_bin_data(data):
         return False
 
 # ==================== КЛАВИАТУРЫ ====================
-def main_menu_kb():
+def main_menu_kb(emergency_data=None):
+    if emergency_data is None:
+        emergency_data = get_bin_data().get("emergency", {})
+    
+    is_blocked = emergency_data.get("is_blocked", False)
+    em_btn_text = "🚨 Режим ЧП: ЗАКРЫТО" if is_blocked else "🚨 Режим ЧП / Стоп-заказ"
+
     kb = telebot.types.InlineKeyboardMarkup()
     kb.add(telebot.types.InlineKeyboardButton("📸 Обновить фото доски", callback_data="hint_photo"))
     kb.add(telebot.types.InlineKeyboardButton("👁 Посмотреть текущее фото", callback_data="view_photo"))
     kb.add(telebot.types.InlineKeyboardButton("📢 Объявление на сайте", callback_data="manage_announcement"))
+    kb.add(telebot.types.InlineKeyboardButton(em_btn_text, callback_data="manage_emergency"))
     kb.add(telebot.types.InlineKeyboardButton("📦 Стоп-лист (Наличие)", callback_data="categories_stock"))
     kb.add(telebot.types.InlineKeyboardButton("💰 Редактор цен", callback_data="categories_price"))
     kb.add(telebot.types.InlineKeyboardButton("🌐 Открыть витрину сайта", url=SITE_URL))
     kb.add(telebot.types.InlineKeyboardButton("🚪 Выйти из системы", callback_data="menu_logout"))
+    return kb
+
+def emergency_kb(is_blocked, has_warning):
+    kb = telebot.types.InlineKeyboardMarkup()
+    if is_blocked:
+        kb.add(telebot.types.InlineKeyboardButton("🟢 Возобновить приём заказов", callback_data="toggle_block_orders"))
+    else:
+        kb.add(telebot.types.InlineKeyboardButton("🔴 Экстренно ОСТАНОВИТЬ заказы", callback_data="toggle_block_orders"))
+    
+    kb.add(telebot.types.InlineKeyboardButton("✏️ Изменить причину блокировки", callback_data="set_block_reason"))
+    kb.add(telebot.types.InlineKeyboardButton("⚠️ Текст у корзины", callback_data="set_cart_warning"))
+    if has_warning:
+        kb.add(telebot.types.InlineKeyboardButton("🗑 Убрать плашку у корзины", callback_data="clear_cart_warning"))
+    kb.add(telebot.types.InlineKeyboardButton("⬅️ В главное меню", callback_data="back_main"))
     return kb
 
 def categories_kb(mode):
@@ -159,7 +198,7 @@ def start_cmd(message):
     user_states[uid] = {"state": "LOGIN"}
     bot.send_message(
         message.chat.id,
-        "🔒 <b>Панель управления кафе «Буузная Адис» v1.2.1</b>\n\n"
+        "🔒 <b>Панель управления кафе «Буузная Адис» v1.3.0</b>\n\n"
         "Для работы требуется авторизация.\n"
         "Введите <b>логин</b> сотрудника:",
         parse_mode="HTML"
@@ -170,26 +209,35 @@ def show_dashboard(chat_id, message_id=None):
     out_count = len(bin_data.get("out_of_stock", []))
     cur_ann = bin_data.get("announcement", "")
     ann_status = "📢 Активно" if cur_ann else "⚪ Нет"
-    status_icon = "🟢 Витрина активна"
+    
+    emergency = bin_data.get("emergency", {})
+    is_blocked = emergency.get("is_blocked", False)
+    order_status = "🔴 ЗАКАЗЫ ПРИОСТАНОВЛЕНЫ" if is_blocked else "🟢 Приём заказов открыт"
+    cart_warn = emergency.get("cart_warning", "")
+    cart_status = "⚠️ Установлено" if cart_warn else "⚪ Нет"
     
     text = (
         f"<b>Панель администратора «Буузная Адис»</b>\n\n"
-        f"Статус: {status_icon}\n"
+        f"Приём заказов: <b>{order_status}</b>\n"
         f"Позиций в стоп-листе: <b>{out_count}</b> шт.\n"
-        f"Объявление на сайте: <b>{ann_status}</b>\n\n"
+        f"Объявление на сайте: <b>{ann_status}</b>\n"
+        f"Предупреждение корзины: <b>{cart_status}</b>\n\n"
         f"<i>Выберите нужное действие:</i>"
     )
     
+    kb = main_menu_kb(emergency)
     if message_id:
         try:
-            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=main_menu_kb())
+            bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=kb)
             return
         except Exception:
             pass
-    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=main_menu_kb())
+    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
 
-# ==================== ВВОД ТЕКСТА (ЛОГИН/ПАРОЛЬ/ЦЕНА/ОБЪЯВЛЕНИЕ) ====================
-@bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("state") in ["LOGIN", "PASSWORD", "SET_PRICE", "SET_ANNOUNCEMENT"])
+# ==================== ВВОД ТЕКСТА ====================
+@bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("state") in [
+    "LOGIN", "PASSWORD", "SET_PRICE", "SET_ANNOUNCEMENT", "SET_BLOCK_REASON", "SET_CART_WARNING"
+])
 def handle_text_inputs(message):
     uid = message.from_user.id
     state_info = user_states.get(uid, {})
@@ -240,7 +288,6 @@ def handle_text_inputs(message):
                     pass
 
             user_states[uid] = {}
-            
             bot.send_message(
                 message.chat.id,
                 f"✅ Стоимость <b>{item_name}</b> обновлена: <b>{new_price} ₽</b>",
@@ -259,10 +306,42 @@ def handle_text_inputs(message):
                 message.chat.id,
                 f"✅ <b>Объявление опубликовано на сайте!</b>\n\nТекст:\n«{text}»",
                 parse_mode="HTML",
-                reply_markup=main_menu_kb()
+                reply_markup=main_menu_kb(bin_data.get("emergency"))
             )
         else:
             bot.send_message(message.chat.id, "❌ Ошибка сохранения объявления на сервере.")
+
+    elif state == "SET_BLOCK_REASON":
+        bin_data = get_bin_data()
+        emergency = bin_data.get("emergency", {})
+        emergency["block_reason"] = text
+        bin_data["emergency"] = emergency
+        if update_bin_data(bin_data):
+            user_states[uid] = {}
+            bot.send_message(
+                message.chat.id,
+                f"✅ <b>Причина блокировки сохранена:</b>\n«{text}»\n\n<i>Этот текст видят клиенты, когда приём заказов остановлен.</i>",
+                parse_mode="HTML",
+                reply_markup=main_menu_kb(emergency)
+            )
+        else:
+            bot.send_message(message.chat.id, "❌ Ошибка сохранения на сервере.")
+
+    elif state == "SET_CART_WARNING":
+        bin_data = get_bin_data()
+        emergency = bin_data.get("emergency", {})
+        emergency["cart_warning"] = text
+        bin_data["emergency"] = emergency
+        if update_bin_data(bin_data):
+            user_states[uid] = {}
+            bot.send_message(
+                message.chat.id,
+                f"✅ <b>Предупреждение над корзиной включено!</b>\n\nТекст:\n«{text}»",
+                parse_mode="HTML",
+                reply_markup=main_menu_kb(emergency)
+            )
+        else:
+            bot.send_message(message.chat.id, "❌ Ошибка сохранения на сервере.")
 
 # ==================== ЗАГРУЗКА ФОТО ДОСКИ МЕНЮ НА BEGET ====================
 @bot.message_handler(content_types=['photo'])
@@ -321,7 +400,7 @@ def handle_photo(message):
                     chat_id=message.chat.id,
                     message_id=msg.message_id,
                     parse_mode="HTML",
-                    reply_markup=main_menu_kb()
+                    reply_markup=main_menu_kb(bin_data.get("emergency"))
                 )
             else:
                 bot.edit_message_text("❌ Фото загружено, но не удалось обновить menu.json.", chat_id=message.chat.id, message_id=msg.message_id)
@@ -360,6 +439,7 @@ def handle_callbacks(call):
             bot.send_message(call.message.chat.id, "⚠️ Фотография меню еще не была загружена.")
         bot.answer_callback_query(call.id)
 
+    # ---------- УПРАВЛЕНИЕ ОБЪЯВЛЕНИЯМИ ----------
     elif data == "manage_announcement":
         bin_data = get_bin_data()
         current = bin_data.get("announcement", "")
@@ -398,6 +478,95 @@ def handle_callbacks(call):
             parse_mode="HTML"
         )
         bot.answer_callback_query(call.id)
+
+    # ---------- УПРАВЛЕНИЕ ЧП И СТОП-ЗАКАЗОМ ----------
+    elif data == "manage_emergency":
+        bin_data = get_bin_data()
+        emergency = bin_data.get("emergency", {})
+        is_blocked = emergency.get("is_blocked", False)
+        reason = emergency.get("block_reason", "Не указана")
+        cart_warn = emergency.get("cart_warning", "")
+
+        status_text = "🔴 <b>ПРИЁМ ЗАКАЗОВ ЗАБЛОКИРОВАН</b>" if is_blocked else "🟢 <b>Приём заказов открыт (штатный режим)</b>"
+        warn_display = f"«{cart_warn}»" if cart_warn else "<i>отключено</i>"
+
+        text = (
+            f"🚨 <b>Панель экстренного управления (ЧП)</b>\n\n"
+            f"Текущее состояние: {status_text}\n"
+            f"Причина остановки: <i>«{reason}»</i>\n\n"
+            f"Предупреждение над корзиной: {warn_display}\n\n"
+            f"<i>Здесь вы можете мгновенно заблокировать кнопку заказа на сайте при перегрузке кухни или отключении света/воды.</i>"
+        )
+        bot.edit_message_text(
+            text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=emergency_kb(is_blocked, bool(cart_warn))
+        )
+        bot.answer_callback_query(call.id)
+
+    elif data == "toggle_block_orders":
+        bin_data = get_bin_data()
+        emergency = bin_data.get("emergency", {})
+        is_blocked = not emergency.get("is_blocked", False)
+        emergency["is_blocked"] = is_blocked
+        bin_data["emergency"] = emergency
+
+        if update_bin_data(bin_data):
+            alert = "🔴 Приём заказов остановлен на сайте!" if is_blocked else "🟢 Приём заказов возобновлён!"
+            bot.answer_callback_query(call.id, alert, show_alert=True)
+            # Возвращаемся в меню ЧП с обновленным состоянием
+            reason = emergency.get("block_reason", "Не указана")
+            cart_warn = emergency.get("cart_warning", "")
+            status_text = "🔴 <b>ПРИЁМ ЗАКАЗОВ ЗАБЛОКИРОВАН</b>" if is_blocked else "🟢 <b>Приём заказов открыт (штатный режим)</b>"
+            warn_display = f"«{cart_warn}»" if cart_warn else "<i>отключено</i>"
+
+            text = (
+                f"🚨 <b>Панель экстренного управления (ЧП)</b>\n\n"
+                f"Текущее состояние: {status_text}\n"
+                f"Причина остановки: <i>«{reason}»</i>\n\n"
+                f"Предупреждение над корзиной: {warn_display}\n\n"
+                f"<i>Здесь вы можете мгновенно заблокировать кнопку заказа на сайте при перегрузке кухни или отключении света/воды.</i>"
+            )
+            bot.edit_message_text(
+                text,
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                parse_mode="HTML",
+                reply_markup=emergency_kb(is_blocked, bool(cart_warn))
+            )
+        else:
+            bot.answer_callback_query(call.id, "❌ Ошибка сохранения", show_alert=True)
+
+    elif data == "set_block_reason":
+        user_states[uid] = {"state": "SET_BLOCK_REASON"}
+        bot.send_message(
+            call.message.chat.id,
+            "✏️ Напишите текст причины блокировки, который увидят гости на сайте вместо кнопки оформления:\n\n"
+            "<i>Например: Кухня перегружена, приём заказов приостановлен на 30 минут.</i>",
+            parse_mode="HTML"
+        )
+        bot.answer_callback_query(call.id)
+
+    elif data == "set_cart_warning":
+        user_states[uid] = {"state": "SET_CART_WARNING"}
+        bot.send_message(
+            call.message.chat.id,
+            "⚠️ Напишите текст аварийного предупреждения над корзиной:\n\n"
+            "<i>Например: Внимание! Время отдачи заказа увеличено до 40 минут из-за наплыва гостей.</i>",
+            parse_mode="HTML"
+        )
+        bot.answer_callback_query(call.id)
+
+    elif data == "clear_cart_warning":
+        bin_data = get_bin_data()
+        emergency = bin_data.get("emergency", {})
+        emergency["cart_warning"] = ""
+        bin_data["emergency"] = emergency
+        update_bin_data(bin_data)
+        bot.answer_callback_query(call.id, "✅ Предупреждение у корзины снято!", show_alert=True)
+        show_dashboard(call.message.chat.id, call.message.message_id)
 
     elif data == "menu_logout":
         authenticated_admins.discard(uid)
@@ -495,7 +664,7 @@ def handle_callbacks(call):
 
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    print("🚀 Запуск улучшенного бота «Буузная Адис» v1.2.1...")
+    print("🚀 Запуск улучшенного бота «Буузная Адис» v1.3.0...")
     server_thread = Thread(target=run_web)
     server_thread.daemon = True
     server_thread.start()

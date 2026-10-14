@@ -10,20 +10,36 @@ from PIL import Image
 # ==================== НАСТРОЙКИ ====================
 TELEGRAM_BOT_TOKEN = "8712152425:AAFrgtFyLexFis8K6rAxd5CDqXirctVCWp4"
 
-# Шлюз собственного сервера Beget
 SITE_URL = "https://adis38.ru"
-SITE_API_URL = "https://adis38.ru/api_menu.php?key=adis_secret_bot_key_2026"
-SITE_MENU_URL = "https://adis38.ru/menu.json"
-
-# Выгрузка фото доски
+SITE_API_URL = "https://adis38.ru/api_menu.php"
 SITE_UPLOAD_BOARD_URL = "https://adis38.ru/api_upload_board.php"
 UPLOAD_SECRET = "AdisMenuSecretKey_2026"
+BOT_API_KEY = "adis_secret_bot_key_2026"
 
 ADMIN_LOGIN = "admin"
 ADMIN_PASSWORD = "11111"
 
+# Реестр филиалов
+BRANCHES = {
+    "dekabr": {
+        "name": "ТД «Антураж» (Декабрьских Событий, 78и)",
+        "short": "Декабрьских Событий",
+        "file": "menu_dekabr.json"
+    },
+    "vampilova": {
+        "name": "ТЦ «Первомайский» (ул. Вампилова, 2/2)",
+        "short": "Первомайский",
+        "file": "menu_vampilova.json"
+    },
+    "berezovy": {
+        "name": "мкр. Берёзовый, 131 (р. п. Маркова)",
+        "short": "Берёзовый",
+        "file": "menu_berezovy.json"
+    }
+}
+
 authenticated_admins = set()
-# {uid: {"state": ..., "login": ..., "main_msg_id": ..., ...}}
+# {uid: {"state": ..., "branch": "dekabr", "main_msg_id": ..., ...}}
 user_states = {}
 
 MENU_CATEGORIES = {
@@ -78,7 +94,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Бот кафе Адис работает 24/7!"
+    return "Мультифилиальный бот кафе Адис работает 24/7!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -94,9 +110,11 @@ def safe_delete_message(chat_id, message_id):
         pass
 
 # ==================== РАБОТА С JSON НА СЕРВЕРЕ ====================
-def get_bin_data():
+def get_branch_data(branch_id):
+    branch_cfg = BRANCHES.get(branch_id, BRANCHES["dekabr"])
+    file_name = branch_cfg["file"]
     try:
-        url = f"{SITE_MENU_URL}?t={int(time.time())}"
+        url = f"{SITE_URL}/data/{file_name}?t={int(time.time())}"
         r = requests.get(url, timeout=10)
         if r.status_code == 200:
             data = r.json()
@@ -108,7 +126,8 @@ def get_bin_data():
                 }
             return data
     except Exception as e:
-        print(f"❌ Ошибка чтения menu.json: {e}")
+        print(f"❌ Ошибка чтения {file_name}: {e}")
+
     return {
         "image_url": "",
         "out_of_stock": [],
@@ -121,31 +140,40 @@ def get_bin_data():
         }
     }
 
-def update_bin_data(data):
+def update_branch_data(branch_id, data):
     headers = {"Content-Type": "application/json"}
     try:
-        r = requests.post(SITE_API_URL, headers=headers, json=data, timeout=15)
+        url = f"{SITE_API_URL}?key={BOT_API_KEY}&branch={branch_id}"
+        r = requests.post(url, headers=headers, json=data, timeout=15)
         return r.status_code == 200
     except Exception as e:
         print(f"❌ Ошибка отправки на Beget: {e}")
         return False
 
 # ==================== КЛАВИАТУРЫ ====================
-def main_menu_kb(emergency_data=None):
+def branch_select_kb():
+    kb = telebot.types.InlineKeyboardMarkup()
+    for b_id, b_info in BRANCHES.items():
+        kb.add(telebot.types.InlineKeyboardButton(f"📍 {b_info['name']}", callback_data=f"select_branch_{b_id}"))
+    kb.add(telebot.types.InlineKeyboardButton("🚪 Выйти из системы", callback_data="menu_logout"))
+    return kb
+
+def main_menu_kb(branch_id, emergency_data=None):
     if emergency_data is None:
-        emergency_data = get_bin_data().get("emergency", {})
+        emergency_data = get_branch_data(branch_id).get("emergency", {})
     
     is_blocked = emergency_data.get("is_blocked", False)
     em_btn_text = "🚨 Режим ЧП: ЗАКРЫТО" if is_blocked else "🚨 Режим ЧП / Стоп-заказ"
 
     kb = telebot.types.InlineKeyboardMarkup()
     kb.add(telebot.types.InlineKeyboardButton("📸 Обновить фото доски", callback_data="hint_photo"))
-    kb.add(telebot.types.InlineKeyboardButton("📢 Объявление на сайте", callback_data="manage_announcement"))
+    kb.add(telebot.types.InlineKeyboardButton("📢 Объявление филиала", callback_data="manage_announcement"))
     kb.add(telebot.types.InlineKeyboardButton(em_btn_text, callback_data="manage_emergency"))
     kb.add(telebot.types.InlineKeyboardButton("📦 Стоп-лист (Наличие)", callback_data="categories_stock"))
     kb.add(telebot.types.InlineKeyboardButton("💰 Редактор цен", callback_data="categories_price"))
-    kb.add(telebot.types.InlineKeyboardButton("🌐 Открыть витрину сайта", url=SITE_URL))
-    kb.add(telebot.types.InlineKeyboardButton("🚪 Выйти из системы", callback_data="menu_logout"))
+    kb.add(telebot.types.InlineKeyboardButton("🔄 Сменить филиал управления", callback_data="switch_branch"))
+    kb.add(telebot.types.InlineKeyboardButton("🌐 Открыть сайт кафе", url=SITE_URL))
+    kb.add(telebot.types.InlineKeyboardButton("🚪 Выйти", callback_data="menu_logout"))
     return kb
 
 def cancel_input_kb(back_action="back_main"):
@@ -164,14 +192,14 @@ def emergency_kb(is_blocked, has_warning):
     kb.add(telebot.types.InlineKeyboardButton("⚠️ Текст у корзины", callback_data="set_cart_warning"))
     if has_warning:
         kb.add(telebot.types.InlineKeyboardButton("🗑 Убрать плашку у корзины", callback_data="clear_cart_warning"))
-    kb.add(telebot.types.InlineKeyboardButton("⬅️ В главное меню", callback_data="back_main"))
+    kb.add(telebot.types.InlineKeyboardButton("⬅️ В меню филиала", callback_data="back_main"))
     return kb
 
 def categories_kb(mode):
     kb = telebot.types.InlineKeyboardMarkup()
     for cat_key, cat_val in MENU_CATEGORIES.items():
         kb.add(telebot.types.InlineKeyboardButton(cat_val["title"], callback_data=f"cat_{mode}_{cat_key}"))
-    kb.add(telebot.types.InlineKeyboardButton("⬅️ В главное меню", callback_data="back_main"))
+    kb.add(telebot.types.InlineKeyboardButton("⬅️ В меню филиала", callback_data="back_main"))
     return kb
 
 def stock_items_kb(cat_key, out_of_stock):
@@ -195,32 +223,12 @@ def price_items_kb(cat_key, current_prices):
     return kb
 
 # ==================== ОТОБРАЖЕНИЕ ЭКРАНОВ ====================
-def render_dashboard_text():
-    bin_data = get_bin_data()
-    out_count = len(bin_data.get("out_of_stock", []))
-    cur_ann = bin_data.get("announcement", "")
-    ann_status = "📢 Активно" if cur_ann else "⚪ Нет"
-    
-    emergency = bin_data.get("emergency", {})
-    is_blocked = emergency.get("is_blocked", False)
-    order_status = "🔴 ЗАКАЗЫ ПРИОСТАНОВЛЕНЫ" if is_blocked else "🟢 Приём заказов открыт"
-    cart_warn = emergency.get("cart_warning", "")
-    cart_status = "⚠️ Установлено" if cart_warn else "⚪ Нет"
-    
+def show_branch_selector(chat_id, user_id, message_id=None):
     text = (
-        f"<b>Панель администратора «Буузная Адис»</b>\n\n"
-        f"Приём заказов: <b>{order_status}</b>\n"
-        f"Позиций в стоп-листе: <b>{out_count}</b> шт.\n"
-        f"Объявление на сайте: <b>{ann_status}</b>\n"
-        f"Предупреждение корзины: <b>{cart_status}</b>\n\n"
-        f"<i>Выберите нужное действие:</i>"
+        "🏢 <b>Сеть кафе «Буузная Адис»</b>\n\n"
+        "Выберите филиал, для которого хотите настроить меню, стоп-лист или загрузить фото доски:"
     )
-    return text, emergency
-
-def show_dashboard(chat_id, user_id, message_id=None):
-    text, emergency = render_dashboard_text()
-    kb = main_menu_kb(emergency)
-
+    kb = branch_select_kb()
     target_id = message_id or user_states.get(user_id, {}).get("main_msg_id")
 
     if target_id:
@@ -234,22 +242,65 @@ def show_dashboard(chat_id, user_id, message_id=None):
     msg = bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
     user_states[user_id] = {"main_msg_id": msg.message_id}
 
-def show_emergency_menu(chat_id, message_id):
-    bin_data = get_bin_data()
+def render_dashboard_text(branch_id):
+    branch_cfg = BRANCHES.get(branch_id, BRANCHES["dekabr"])
+    bin_data = get_branch_data(branch_id)
+
+    out_count = len(bin_data.get("out_of_stock", []))
+    cur_ann = bin_data.get("announcement", "")
+    ann_status = "📢 Активно" if cur_ann else "⚪ Нет"
+    
+    emergency = bin_data.get("emergency", {})
+    is_blocked = emergency.get("is_blocked", False)
+    order_status = "🔴 ЗАКАЗЫ ПРИОСТАНОВЛЕНЫ" if is_blocked else "🟢 Приём заказов открыт"
+    cart_warn = emergency.get("cart_warning", "")
+    cart_status = "⚠️ Установлено" if cart_warn else "⚪ Нет"
+    
+    text = (
+        f"<b>Панель управления: {branch_cfg['name']}</b>\n\n"
+        f"Статус филиала: <b>{order_status}</b>\n"
+        f"Позиций в стоп-листе: <b>{out_count}</b> шт.\n"
+        f"Объявление точки: <b>{ann_status}</b>\n"
+        f"Предупреждение корзины: <b>{cart_status}</b>\n\n"
+        f"<i>Выберите действие для этого кафе:</i>"
+    )
+    return text, emergency
+
+def show_dashboard(chat_id, user_id, message_id=None):
+    current_branch = user_states.get(user_id, {}).get("branch", "dekabr")
+    text, emergency = render_dashboard_text(current_branch)
+    kb = main_menu_kb(current_branch, emergency)
+
+    target_id = message_id or user_states.get(user_id, {}).get("main_msg_id")
+
+    if target_id:
+        try:
+            bot.edit_message_text(text, chat_id=chat_id, message_id=target_id, parse_mode="HTML", reply_markup=kb)
+            user_states[user_id]["main_msg_id"] = target_id
+            return
+        except Exception:
+            pass
+
+    msg = bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+    user_states[user_id]["main_msg_id"] = msg.message_id
+
+def show_emergency_menu(chat_id, message_id, branch_id):
+    bin_data = get_branch_data(branch_id)
     emergency = bin_data.get("emergency", {})
     is_blocked = emergency.get("is_blocked", False)
     reason = emergency.get("block_reason", "Не указана")
     cart_warn = emergency.get("cart_warning", "")
+    b_name = BRANCHES.get(branch_id, {}).get("short", branch_id)
 
-    status_text = "🔴 <b>ПРИЁМ ЗАКАЗОВ ЗАБЛОКИРОВАН</b>" if is_blocked else "🟢 <b>Приём заказов открыт (штатный режим)</b>"
+    status_text = "🔴 <b>ПРИЁМ ЗАКАЗОВ ЗАБЛОКИРОВАН</b>" if is_blocked else "🟢 <b>Приём заказов открыт (штатно)</b>"
     warn_display = f"«{cart_warn}»" if cart_warn else "<i>отключено</i>"
 
     text = (
-        f"🚨 <b>Панель экстренного управления (ЧП)</b>\n\n"
+        f"🚨 <b>Управление ЧП: филиал {b_name}</b>\n\n"
         f"Текущее состояние: {status_text}\n"
         f"Причина остановки: <i>«{reason}»</i>\n\n"
         f"Предупреждение над корзиной: {warn_display}\n\n"
-        f"<i>Здесь вы можете мгновенно остановить заказы на сайте при перегрузке кухни или отключении света/воды.</i>"
+        f"<i>Блокировка остановит оформление заказов на сайте именно для этого филиала.</i>"
     )
     bot.edit_message_text(
         text,
@@ -269,13 +320,13 @@ def start_cmd(message):
     old_main = user_states.get(uid, {}).get("main_msg_id")
 
     if uid in authenticated_admins:
-        show_dashboard(chat_id, uid, old_main)
+        show_branch_selector(chat_id, uid, old_main)
         return
 
     text = (
-        "🔒 <b>Панель управления кафе «Буузная Адис» v1.3.1</b>\n\n"
-        "Для работы требуется авторизация.\n"
-        "Введите <b>логин</b> сотрудника:"
+        "🔒 <b>Панель управления сетью «Буузная Адис» v1.3.1</b>\n\n"
+        "Для работы требуется авторизация сотрудника.\n"
+        "Введите <b>логин</b>:"
     )
 
     if old_main:
@@ -289,7 +340,7 @@ def start_cmd(message):
     msg = bot.send_message(chat_id, text, parse_mode="HTML")
     user_states[uid] = {"state": "LOGIN", "main_msg_id": msg.message_id}
 
-# ==================== ОБРАБОТКА ВВОДА ТЕКСТА ====================
+# ==================== ТЕКСТОВЫЙ ВВОД ====================
 @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("state") in [
     "LOGIN", "PASSWORD", "SET_PRICE", "SET_ANNOUNCEMENT", "SET_BLOCK_REASON", "SET_CART_WARNING"
 ])
@@ -297,11 +348,11 @@ def handle_text_inputs(message):
     uid = message.from_user.id
     state_info = user_states.get(uid, {})
     state = state_info.get("state")
+    branch_id = state_info.get("branch", "dekabr")
     text = message.text.strip()
     chat_id = message.chat.id
     main_msg_id = state_info.get("main_msg_id")
 
-    # Стираем входящее сообщение пользователя, сохраняя чистоту экрана
     safe_delete_message(chat_id, message.message_id)
 
     if state == "LOGIN":
@@ -318,11 +369,11 @@ def handle_text_inputs(message):
         login = state_info.get("login")
         if login == ADMIN_LOGIN and text == ADMIN_PASSWORD:
             authenticated_admins.add(uid)
-            show_dashboard(chat_id, uid, main_msg_id)
+            show_branch_selector(chat_id, uid, main_msg_id)
         else:
             user_states[uid] = {"main_msg_id": main_msg_id}
             bot.edit_message_text(
-                "❌ <b>Неверный логин или пароль.</b>\nНажмите /start для повторной попытки.",
+                "❌ <b>Неверный логин или пароль.</b>\nНажмите /start для повторного входа.",
                 chat_id=chat_id,
                 message_id=main_msg_id,
                 parse_mode="HTML"
@@ -344,16 +395,16 @@ def handle_text_inputs(message):
         item_id = state_info.get("item_id")
         cat_key = state_info.get("cat_key")
 
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         prices = bin_data.get("prices", {})
         prices[item_id] = new_price
         bin_data["prices"] = prices
-        update_bin_data(bin_data)
+        update_branch_data(branch_id, bin_data)
 
         cat_title = MENU_CATEGORIES[cat_key]["title"]
-        user_states[uid] = {"main_msg_id": main_msg_id}
+        user_states[uid]["state"] = None
         bot.edit_message_text(
-            f"💰 <b>Цены: {cat_title}</b>\n(Цена позиции обновлена на {new_price} ₽)\nВыберите позицию:",
+            f"💰 <b>Цены ({BRANCHES[branch_id]['short']}): {cat_title}</b>\n(Обновлено: {new_price} ₽)\nВыберите позицию:",
             chat_id=chat_id,
             message_id=main_msg_id,
             parse_mode="HTML",
@@ -361,28 +412,29 @@ def handle_text_inputs(message):
         )
 
     elif state == "SET_ANNOUNCEMENT":
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         bin_data["announcement"] = text
-        update_bin_data(bin_data)
+        update_branch_data(branch_id, bin_data)
+        user_states[uid]["state"] = None
         show_dashboard(chat_id, uid, main_msg_id)
 
     elif state == "SET_BLOCK_REASON":
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         emergency = bin_data.get("emergency", {})
         emergency["block_reason"] = text
         bin_data["emergency"] = emergency
-        update_bin_data(bin_data)
-        user_states[uid] = {"main_msg_id": main_msg_id}
-        show_emergency_menu(chat_id, main_msg_id)
+        update_branch_data(branch_id, bin_data)
+        user_states[uid]["state"] = None
+        show_emergency_menu(chat_id, main_msg_id, branch_id)
 
     elif state == "SET_CART_WARNING":
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         emergency = bin_data.get("emergency", {})
         emergency["cart_warning"] = text
         bin_data["emergency"] = emergency
-        update_bin_data(bin_data)
-        user_states[uid] = {"main_msg_id": main_msg_id}
-        show_emergency_menu(chat_id, main_msg_id)
+        update_branch_data(branch_id, bin_data)
+        user_states[uid]["state"] = None
+        show_emergency_menu(chat_id, main_msg_id, branch_id)
 
 # ==================== ЗАГРУЗКА ФОТО ДОСКИ ====================
 @bot.message_handler(content_types=['photo'])
@@ -394,10 +446,17 @@ def handle_photo(message):
     if uid not in authenticated_admins:
         return
 
+    branch_id = user_states.get(uid, {}).get("branch", "dekabr")
     main_msg_id = user_states.get(uid, {}).get("main_msg_id")
+
     if main_msg_id:
         try:
-            bot.edit_message_text("⏳ Сжимаю и отправляю фото на сервер adis38.ru...", chat_id=chat_id, message_id=main_msg_id)
+            bot.edit_message_text(
+                f"⏳ Загружаю доску для филиала <b>{BRANCHES[branch_id]['short']}</b>...",
+                chat_id=chat_id,
+                message_id=main_msg_id,
+                parse_mode="HTML"
+            )
         except Exception:
             pass
 
@@ -414,23 +473,26 @@ def handle_photo(message):
         img.save(output, format="JPEG", quality=85, optimize=True)
         compressed_bytes = output.getvalue()
 
-        files = {'photo': ('menu_board.jpg', compressed_bytes, 'image/jpeg')}
-        data = {'secret': UPLOAD_SECRET}
+        files = {'photo': (f'menu_board_{branch_id}.jpg', compressed_bytes, 'image/jpeg')}
+        data = {
+            'secret': UPLOAD_SECRET,
+            'branch': branch_id
+        }
 
         res = requests.post(SITE_UPLOAD_BOARD_URL, files=files, data=data, timeout=30)
         res_json = res.json()
 
         if res_json.get("ok"):
             image_url = res_json.get("url")
-            bin_data = get_bin_data()
+            bin_data = get_branch_data(branch_id)
             bin_data["image_url"] = image_url
-            update_bin_data(bin_data)
+            update_branch_data(branch_id, bin_data)
     except Exception as e:
         print(f"Ошибка загрузки фото: {e}")
 
     show_dashboard(chat_id, uid, main_msg_id)
 
-# ==================== ОБРАБОТКА ИНЛАЙН-КНОПОК ====================
+# ==================== ОБРАБОТКА CALLBACK ====================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     uid = call.from_user.id
@@ -442,22 +504,41 @@ def handle_callbacks(call):
         return
 
     data = call.data
+    state_info = user_states.setdefault(uid, {})
+    branch_id = state_info.get("branch", "dekabr")
 
-    if data == "back_main":
-        user_states[uid] = {"main_msg_id": msg_id}
+    # ---------- ВЫБОР ФИЛИАЛА ----------
+    if data.startswith("select_branch_"):
+        b_id = data.replace("select_branch_", "")
+        if b_id in BRANCHES:
+            state_info["branch"] = b_id
+            state_info["main_msg_id"] = msg_id
+            show_dashboard(chat_id, uid, msg_id)
+            bot.answer_callback_query(call.id, f"Выбран филиал: {BRANCHES[b_id]['short']}")
+        return
+
+    elif data == "switch_branch":
+        show_branch_selector(chat_id, uid, msg_id)
+        bot.answer_callback_query(call.id)
+        return
+
+    elif data == "back_main":
+        state_info["main_msg_id"] = msg_id
+        state_info["state"] = None
         show_dashboard(chat_id, uid, msg_id)
         bot.answer_callback_query(call.id)
 
     elif data == "hint_photo":
+        b_name = BRANCHES[branch_id]["short"]
         bot.answer_callback_query(
             call.id,
-            "📸 Просто отправьте фото доски прямо в чат — бот обработает его и сразу обновит на сайте!",
+            f"📸 Пришлите фото доски в чат — оно обновит меню филиала «{b_name}» на сайте!",
             show_alert=True
         )
 
-    # ---------- ОБЪЯВЛЕНИЕ ----------
+    # ---------- ОБЪЯВЛЕНИЕ ТОЧКИ ----------
     elif data == "manage_announcement":
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         current = bin_data.get("announcement", "")
         current_display = f"<i>«{current}»</i>" if current else "<i>(сейчас отключено)</i>"
 
@@ -465,12 +546,12 @@ def handle_callbacks(call):
         kb.add(telebot.types.InlineKeyboardButton("✏️ Задать новый текст", callback_data="set_announcement"))
         if current:
             kb.add(telebot.types.InlineKeyboardButton("🗑 Отключить объявление", callback_data="clear_announcement"))
-        kb.add(telebot.types.InlineKeyboardButton("⬅️ В главное меню", callback_data="back_main"))
+        kb.add(telebot.types.InlineKeyboardButton("⬅️ В меню филиала", callback_data="back_main"))
 
         bot.edit_message_text(
-            f"📢 <b>Управление объявлением на сайте</b>\n\n"
-            f"Текущий баннер:\n{current_display}\n\n"
-            f"Оно отображается яркой полосой сверху всех страниц сайта с кнопкой закрытия.",
+            f"📢 <b>Объявление: {BRANCHES[branch_id]['name']}</b>\n\n"
+            f"Текущий текст:\n{current_display}\n\n"
+            f"Отобразится на сайте, когда выбран этот филиал.",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -479,10 +560,10 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id)
 
     elif data == "set_announcement":
-        user_states[uid] = {"state": "SET_ANNOUNCEMENT", "main_msg_id": msg_id}
+        state_info["state"] = "SET_ANNOUNCEMENT"
+        state_info["main_msg_id"] = msg_id
         bot.edit_message_text(
-            "✏️ <b>Напишите текст рекламного объявления в чат:</b>\n\n"
-            "<i>(Ваше сообщение сразу удалится, а текст появится на сайте)</i>",
+            f"✏️ <b>Напишите текст объявления для точки «{BRANCHES[branch_id]['short']}»:</b>",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -491,35 +572,36 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id)
 
     elif data == "clear_announcement":
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         bin_data["announcement"] = ""
-        update_bin_data(bin_data)
-        bot.answer_callback_query(call.id, "✅ Объявление убрано с сайта!", show_alert=True)
+        update_branch_data(branch_id, bin_data)
+        bot.answer_callback_query(call.id, "✅ Объявление убрано!", show_alert=True)
         show_dashboard(chat_id, uid, msg_id)
 
     # ---------- ЧП И СТОП-ЗАКАЗ ----------
     elif data == "manage_emergency":
-        user_states[uid] = {"main_msg_id": msg_id}
-        show_emergency_menu(chat_id, msg_id)
+        state_info["main_msg_id"] = msg_id
+        show_emergency_menu(chat_id, msg_id, branch_id)
         bot.answer_callback_query(call.id)
 
     elif data == "toggle_block_orders":
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         emergency = bin_data.get("emergency", {})
         is_blocked = not emergency.get("is_blocked", False)
         emergency["is_blocked"] = is_blocked
         bin_data["emergency"] = emergency
-        update_bin_data(bin_data)
+        update_branch_data(branch_id, bin_data)
 
-        alert = "🔴 Приём заказов остановлен на сайте!" if is_blocked else "🟢 Приём заказов возобновлён!"
+        b_name = BRANCHES[branch_id]["short"]
+        alert = f"🔴 Приём заказов остановлен ({b_name})!" if is_blocked else f"🟢 Заказы открыты ({b_name})!"
         bot.answer_callback_query(call.id, alert, show_alert=True)
-        show_emergency_menu(chat_id, msg_id)
+        show_emergency_menu(chat_id, msg_id, branch_id)
 
     elif data == "set_block_reason":
-        user_states[uid] = {"state": "SET_BLOCK_REASON", "main_msg_id": msg_id}
+        state_info["state"] = "SET_BLOCK_REASON"
+        state_info["main_msg_id"] = msg_id
         bot.edit_message_text(
-            "✏️ <b>Напишите причину блокировки заказов:</b>\n\n"
-            "<i>Например: Кухня перегружена, приём заказов приостановлен на 30 минут.</i>",
+            "✏️ <b>Напишите причину блокировки заказов:</b>",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -528,10 +610,10 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id)
 
     elif data == "set_cart_warning":
-        user_states[uid] = {"state": "SET_CART_WARNING", "main_msg_id": msg_id}
+        state_info["state"] = "SET_CART_WARNING"
+        state_info["main_msg_id"] = msg_id
         bot.edit_message_text(
-            "⚠️ <b>Напишите текст предупреждения над корзиной:</b>\n\n"
-            "<i>Например: Время отдачи увеличено до 40 минут из-за наплыва гостей.</i>",
+            "⚠️ <b>Напишите текст предупреждения над корзиной:</b>",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -540,18 +622,18 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id)
 
     elif data == "clear_cart_warning":
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         emergency = bin_data.get("emergency", {})
         emergency["cart_warning"] = ""
         bin_data["emergency"] = emergency
-        update_bin_data(bin_data)
-        bot.answer_callback_query(call.id, "✅ Предупреждение у корзины снято!", show_alert=True)
-        show_emergency_menu(chat_id, msg_id)
+        update_branch_data(branch_id, bin_data)
+        bot.answer_callback_query(call.id, "✅ Предупреждение снято!", show_alert=True)
+        show_emergency_menu(chat_id, msg_id, branch_id)
 
     # ---------- СТОП-ЛИСТ ----------
     elif data == "categories_stock":
         bot.edit_message_text(
-            "📦 <b>Управление стоп-листом</b>\nВыберите категорию блюд:",
+            f"📦 <b>Стоп-лист филиала: {BRANCHES[branch_id]['short']}</b>\nВыберите категорию:",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -561,11 +643,11 @@ def handle_callbacks(call):
 
     elif data.startswith("cat_stock_"):
         cat_key = data.replace("cat_stock_", "")
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         out_of_stock = bin_data.get("out_of_stock", [])
         cat_title = MENU_CATEGORIES[cat_key]["title"]
         bot.edit_message_text(
-            f"📦 <b>Стоп-лист: {cat_title}</b>\n\n🟢 — есть в наличии\n🔴 — в стоп-листе\n<i>Нажмите для переключения:</i>",
+            f"📦 <b>{cat_title} ({BRANCHES[branch_id]['short']})</b>\n\n🟢 — есть в наличии\n🔴 — в стоп-листе:",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -575,7 +657,7 @@ def handle_callbacks(call):
 
     elif data.startswith("toggle_stock_"):
         _, _, cat_key, item_id = data.split("_", 3)
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         out_of_stock = bin_data.get("out_of_stock", [])
 
         if item_id in out_of_stock:
@@ -586,7 +668,7 @@ def handle_callbacks(call):
             alert_text = "🔴 Блюдо выключено"
 
         bin_data["out_of_stock"] = out_of_stock
-        update_bin_data(bin_data)
+        update_branch_data(branch_id, bin_data)
 
         bot.edit_message_reply_markup(
             chat_id=chat_id,
@@ -598,7 +680,7 @@ def handle_callbacks(call):
     # ---------- РЕДАКТОР ЦЕН ----------
     elif data == "categories_price":
         bot.edit_message_text(
-            "💰 <b>Редактор цен</b>\nВыберите категорию:",
+            f"💰 <b>Редактор цен ({BRANCHES[branch_id]['short']})</b>\nВыберите категорию:",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -608,11 +690,11 @@ def handle_callbacks(call):
 
     elif data.startswith("cat_price_"):
         cat_key = data.replace("cat_price_", "")
-        bin_data = get_bin_data()
+        bin_data = get_branch_data(branch_id)
         prices = bin_data.get("prices", {})
         cat_title = MENU_CATEGORIES[cat_key]["title"]
         bot.edit_message_text(
-            f"💰 <b>Цены: {cat_title}</b>\nВыберите позицию для изменения:",
+            f"💰 <b>Цены ({BRANCHES[branch_id]['short']}): {cat_title}</b>\nВыберите позицию:",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -624,15 +706,13 @@ def handle_callbacks(call):
         _, _, cat_key, item_id = data.split("_", 3)
         item_name = ALL_ITEMS.get(item_id, (item_id, 0))[0]
 
-        user_states[uid] = {
-            "state": "SET_PRICE",
-            "item_id": item_id,
-            "cat_key": cat_key,
-            "main_msg_id": msg_id
-        }
+        state_info["state"] = "SET_PRICE"
+        state_info["item_id"] = item_id
+        state_info["cat_key"] = cat_key
+        state_info["main_msg_id"] = msg_id
 
         bot.edit_message_text(
-            f"✏️ Введите новую стоимость для позиции:\n<b>{item_name}</b> (только целое число):",
+            f"✏️ Введите цену для филиала <b>{BRANCHES[branch_id]['short']}</b>:\n<b>{item_name}</b> (числом, например: <code>150</code>):",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -653,7 +733,7 @@ def handle_callbacks(call):
 
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    print("🚀 Запуск чистого бота «Буузная Адис» v1.3.1 (Single Screen)...")
+    print("🚀 Запуск мультифилиального бота «Буузная Адис» v1.3.1...")
     server_thread = Thread(target=run_web)
     server_thread.daemon = True
     server_thread.start()

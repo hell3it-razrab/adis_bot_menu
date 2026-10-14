@@ -16,8 +16,33 @@ SITE_UPLOAD_BOARD_URL = "https://adis38.ru/api_upload_board.php"
 UPLOAD_SECRET = "AdisMenuSecretKey_2026"
 BOT_API_KEY = "adis_secret_bot_key_2026"
 
-ADMIN_LOGIN = "admin"
-ADMIN_PASSWORD = "11111"
+# Учётные записи сотрудников и суперадмина
+ADMIN_USERS = {
+    # Главный администратор сети (доступ ко всем филиалам)
+    "admin": {
+        "password": "11111",
+        "branch": "all",
+        "role_title": "Главный администратор сети"
+    },
+    # Точка 1: Декабрьских Событий
+    "decab": {
+        "password": "11111",
+        "branch": "dekabr",
+        "role_title": "Кафе Декабрьских Событий, 78и"
+    },
+    # Точка 2: ТЦ Первомайский (Вампилова)
+    "pervo": {
+        "password": "22222",
+        "branch": "vampilova",
+        "role_title": "Кафе ТЦ «Первомайский»"
+    },
+    # Точка 3: мкр. Берёзовый
+    "berez": {
+        "password": "33333",
+        "branch": "berezovy",
+        "role_title": "Кафе мкр. Берёзовый, 131"
+    }
+}
 
 # Реестр филиалов
 BRANCHES = {
@@ -38,8 +63,10 @@ BRANCHES = {
     }
 }
 
-authenticated_admins = set()
-# {uid: {"state": ..., "branch": "dekabr", "main_msg_id": ..., ...}}
+# {uid: {"login": ..., "branch": ..., "role_title": ..., "is_super": bool}}
+authenticated_admins = {}
+
+# {uid: {"state": ..., "main_msg_id": ..., ...}}
 user_states = {}
 
 MENU_CATEGORIES = {
@@ -158,7 +185,7 @@ def branch_select_kb():
     kb.add(telebot.types.InlineKeyboardButton("🚪 Выйти из системы", callback_data="menu_logout"))
     return kb
 
-def main_menu_kb(branch_id, emergency_data=None):
+def main_menu_kb(branch_id, is_super=False, emergency_data=None):
     if emergency_data is None:
         emergency_data = get_branch_data(branch_id).get("emergency", {})
     
@@ -171,7 +198,11 @@ def main_menu_kb(branch_id, emergency_data=None):
     kb.add(telebot.types.InlineKeyboardButton(em_btn_text, callback_data="manage_emergency"))
     kb.add(telebot.types.InlineKeyboardButton("📦 Стоп-лист (Наличие)", callback_data="categories_stock"))
     kb.add(telebot.types.InlineKeyboardButton("💰 Редактор цен", callback_data="categories_price"))
-    kb.add(telebot.types.InlineKeyboardButton("🔄 Сменить филиал управления", callback_data="switch_branch"))
+    
+    # Кнопку смены филиала показываем только для суперадмина
+    if is_super:
+        kb.add(telebot.types.InlineKeyboardButton("🔄 Сменить филиал управления", callback_data="switch_branch"))
+        
     kb.add(telebot.types.InlineKeyboardButton("🌐 Открыть сайт кафе", url=SITE_URL))
     kb.add(telebot.types.InlineKeyboardButton("🚪 Выйти", callback_data="menu_logout"))
     return kb
@@ -225,8 +256,8 @@ def price_items_kb(cat_key, current_prices):
 # ==================== ОТОБРАЖЕНИЕ ЭКРАНОВ ====================
 def show_branch_selector(chat_id, user_id, message_id=None):
     text = (
-        "🏢 <b>Сеть кафе «Буузная Адис»</b>\n\n"
-        "Выберите филиал, для которого хотите настроить меню, стоп-лист или загрузить фото доски:"
+        "🏢 <b>Панель главного администратора</b>\n\n"
+        "Выберите филиал сети для управления меню, стоп-листом и режимом ЧП:"
     )
     kb = branch_select_kb()
     target_id = message_id or user_states.get(user_id, {}).get("main_msg_id")
@@ -234,7 +265,7 @@ def show_branch_selector(chat_id, user_id, message_id=None):
     if target_id:
         try:
             bot.edit_message_text(text, chat_id=chat_id, message_id=target_id, parse_mode="HTML", reply_markup=kb)
-            user_states[user_id] = {"main_msg_id": target_id}
+            user_states[user_id]["main_msg_id"] = target_id
             return
         except Exception:
             pass
@@ -242,7 +273,7 @@ def show_branch_selector(chat_id, user_id, message_id=None):
     msg = bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
     user_states[user_id] = {"main_msg_id": msg.message_id}
 
-def render_dashboard_text(branch_id):
+def render_dashboard_text(branch_id, role_title=""):
     branch_cfg = BRANCHES.get(branch_id, BRANCHES["dekabr"])
     bin_data = get_branch_data(branch_id)
 
@@ -257,19 +288,23 @@ def render_dashboard_text(branch_id):
     cart_status = "⚠️ Установлено" if cart_warn else "⚪ Нет"
     
     text = (
-        f"<b>Панель управления: {branch_cfg['name']}</b>\n\n"
+        f"<b>Панель управления: {branch_cfg['name']}</b>\n"
+        f"<i>Сотрудник: {role_title}</i>\n\n"
         f"Статус филиала: <b>{order_status}</b>\n"
         f"Позиций в стоп-листе: <b>{out_count}</b> шт.\n"
-        f"Объявление точки: <b>{ann_status}</b>\n"
+        f"Объявление филиала: <b>{ann_status}</b>\n"
         f"Предупреждение корзины: <b>{cart_status}</b>\n\n"
-        f"<i>Выберите действие для этого кафе:</i>"
+        f"<i>Выберите нужное действие:</i>"
     )
     return text, emergency
 
 def show_dashboard(chat_id, user_id, message_id=None):
-    current_branch = user_states.get(user_id, {}).get("branch", "dekabr")
-    text, emergency = render_dashboard_text(current_branch)
-    kb = main_menu_kb(current_branch, emergency)
+    admin_info = authenticated_admins.get(user_id, {})
+    current_branch = user_states.get(user_id, {}).get("branch") or admin_info.get("branch", "dekabr")
+    is_super = admin_info.get("is_super", False)
+
+    text, emergency = render_dashboard_text(current_branch, admin_info.get("role_title", ""))
+    kb = main_menu_kb(current_branch, is_super=is_super, emergency_data=emergency)
 
     target_id = message_id or user_states.get(user_id, {}).get("main_msg_id")
 
@@ -282,6 +317,7 @@ def show_dashboard(chat_id, user_id, message_id=None):
             pass
 
     msg = bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+    user_states[user_id] = user_states.get(user_id, {})
     user_states[user_id]["main_msg_id"] = msg.message_id
 
 def show_emergency_menu(chat_id, message_id, branch_id):
@@ -320,13 +356,17 @@ def start_cmd(message):
     old_main = user_states.get(uid, {}).get("main_msg_id")
 
     if uid in authenticated_admins:
-        show_branch_selector(chat_id, uid, old_main)
+        admin_info = authenticated_admins[uid]
+        if admin_info.get("is_super"):
+            show_branch_selector(chat_id, uid, old_main)
+        else:
+            show_dashboard(chat_id, uid, old_main)
         return
 
     text = (
         "🔒 <b>Панель управления сетью «Буузная Адис» v1.3.1</b>\n\n"
         "Для работы требуется авторизация сотрудника.\n"
-        "Введите <b>логин</b>:"
+        "Введите ваш <b>логин</b>:"
     )
 
     if old_main:
@@ -356,10 +396,10 @@ def handle_text_inputs(message):
     safe_delete_message(chat_id, message.message_id)
 
     if state == "LOGIN":
-        state_info["login"] = text
+        state_info["login"] = text.lower()
         state_info["state"] = "PASSWORD"
         bot.edit_message_text(
-            "🔑 Введите <b>пароль</b>:",
+            f"🔑 Логин: <code>{state_info['login']}</code>\nВведите <b>пароль</b>:",
             chat_id=chat_id,
             message_id=main_msg_id,
             parse_mode="HTML"
@@ -367,9 +407,28 @@ def handle_text_inputs(message):
 
     elif state == "PASSWORD":
         login = state_info.get("login")
-        if login == ADMIN_LOGIN and text == ADMIN_PASSWORD:
-            authenticated_admins.add(uid)
-            show_branch_selector(chat_id, uid, main_msg_id)
+        account = ADMIN_USERS.get(login)
+
+        if account and text == account["password"]:
+            is_super = (account["branch"] == "all")
+            assigned_branch = "dekabr" if is_super else account["branch"]
+
+            authenticated_admins[uid] = {
+                "login": login,
+                "branch": assigned_branch,
+                "role_title": account["role_title"],
+                "is_super": is_super
+            }
+
+            user_states[uid] = {
+                "branch": assigned_branch,
+                "main_msg_id": main_msg_id
+            }
+
+            if is_super:
+                show_branch_selector(chat_id, uid, main_msg_id)
+            else:
+                show_dashboard(chat_id, uid, main_msg_id)
         else:
             user_states[uid] = {"main_msg_id": main_msg_id}
             bot.edit_message_text(
@@ -504,8 +563,9 @@ def handle_callbacks(call):
         return
 
     data = call.data
+    admin_info = authenticated_admins.get(uid, {})
     state_info = user_states.setdefault(uid, {})
-    branch_id = state_info.get("branch", "dekabr")
+    branch_id = state_info.get("branch") or admin_info.get("branch", "dekabr")
 
     # ---------- ВЫБОР ФИЛИАЛА ----------
     if data.startswith("select_branch_"):
@@ -518,8 +578,11 @@ def handle_callbacks(call):
         return
 
     elif data == "switch_branch":
-        show_branch_selector(chat_id, uid, msg_id)
-        bot.answer_callback_query(call.id)
+        if admin_info.get("is_super"):
+            show_branch_selector(chat_id, uid, msg_id)
+            bot.answer_callback_query(call.id)
+        else:
+            bot.answer_callback_query(call.id, "Доступ ограничен вашим филиалом", show_alert=True)
         return
 
     elif data == "back_main":
@@ -722,8 +785,8 @@ def handle_callbacks(call):
 
     # ---------- ВЫХОД ----------
     elif data == "menu_logout":
-        authenticated_admins.discard(uid)
-        user_states[uid] = {}
+        authenticated_admins.pop(uid, None)
+        user_states.pop(uid, None)
         bot.edit_message_text(
             "🚪 Вы вышли из системы. Нажмите /start для входа.",
             chat_id=chat_id,

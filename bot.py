@@ -12,6 +12,7 @@ TELEGRAM_BOT_TOKEN = "8712152425:AAFrgtFyLexFis8K6rAxd5CDqXirctVCWp4"
 
 SITE_URL = "https://adis38.ru"
 SITE_API_URL = "https://adis38.ru/api_menu.php"
+SITE_SETTINGS_URL = "https://dev.adis38.ru/api_settings.php"  # Для тестового сайта
 SITE_UPLOAD_BOARD_URL = "https://adis38.ru/api_upload_board.php"
 UPLOAD_SECRET = "AdisMenuSecretKey_2026"
 BOT_API_KEY = "adis_secret_bot_key_2026"
@@ -199,12 +200,27 @@ def main_menu_kb(branch_id, is_super=False, emergency_data=None):
     kb.add(telebot.types.InlineKeyboardButton("📦 Стоп-лист (Наличие)", callback_data="categories_stock"))
     kb.add(telebot.types.InlineKeyboardButton("💰 Редактор цен", callback_data="categories_price"))
     
-    # Кнопку смены филиала показываем только для суперадмина
+    # Кнопки суперадминистратора
     if is_super:
         kb.add(telebot.types.InlineKeyboardButton("🔄 Сменить филиал управления", callback_data="switch_branch"))
+        kb.add(telebot.types.InlineKeyboardButton("🎨 Тема сайта (Оформление)", callback_data="menu_themes"))
         
     kb.add(telebot.types.InlineKeyboardButton("🌐 Открыть сайт кафе", url=SITE_URL))
     kb.add(telebot.types.InlineKeyboardButton("🚪 Выйти", callback_data="menu_logout"))
+    return kb
+
+def themes_kb():
+    kb = telebot.types.InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        telebot.types.InlineKeyboardButton("🎃 Хэллоуин", callback_data="set_theme_halloween"),
+        telebot.types.InlineKeyboardButton("🍂 Осень", callback_data="set_theme_autumn")
+    )
+    kb.add(
+        telebot.types.InlineKeyboardButton("❄️ Зима", callback_data="set_theme_winter"),
+        telebot.types.InlineKeyboardButton("🎄 Новый Год", callback_data="set_theme_new_year")
+    )
+    kb.add(telebot.types.InlineKeyboardButton("🥟 Фирменная (Стандарт)", callback_data="set_theme_default"))
+    kb.add(telebot.types.InlineKeyboardButton("⬅️ В главное меню", callback_data="back_main"))
     return kb
 
 def cancel_input_kb(back_action="back_main"):
@@ -583,6 +599,45 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id)
         else:
             bot.answer_callback_query(call.id, "Доступ ограничен вашим филиалом", show_alert=True)
+        return
+
+    # ---------- УПРАВЛЕНИЕ ОФОРМЛЕНИЕМ САЙТА ----------
+    elif data == "menu_themes":
+        if admin_info.get("is_super"):
+            bot.edit_message_text(
+                "🎨 <b>Управление оформлением сайта сети</b>\n\n"
+                "Выберите сезонную тему — она автоматически обновит бейдж в шапке и летающие частицы на сайте:",
+                chat_id=chat_id,
+                message_id=msg_id,
+                parse_mode="HTML",
+                reply_markup=themes_kb()
+            )
+            bot.answer_callback_query(call.id)
+        else:
+            bot.answer_callback_query(call.id, "Доступно только главному администратору", show_alert=True)
+        return
+
+    elif data.startswith("set_theme_"):
+        theme_key = data.replace("set_theme_", "")
+        theme_names = {
+            "halloween": "🎃 Хэллоуин",
+            "autumn": "🍂 Уютная осень",
+            "winter": "❄️ Сибирская зима",
+            "new_year": "🎄 Новый Год",
+            "default": "🥟 Фирменная"
+        }
+        title = theme_names.get(theme_key, theme_key)
+
+        try:
+            r = requests.post(SITE_SETTINGS_URL, json={"theme": theme_key}, timeout=5)
+            if r.status_code == 200:
+                bot.answer_callback_query(call.id, f"Тема «{title}» успешно установлена!", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, f"Ошибка сервера: {r.status_code}", show_alert=True)
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"Ошибка запроса: {e}", show_alert=True)
+
+        show_dashboard(chat_id, uid, msg_id)
         return
 
     elif data == "back_main":

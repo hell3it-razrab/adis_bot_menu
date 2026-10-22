@@ -12,32 +12,28 @@ TELEGRAM_BOT_TOKEN = "8712152425:AAFrgtFyLexFis8K6rAxd5CDqXirctVCWp4"
 
 SITE_URL = "https://adis38.ru"
 SITE_API_URL = "https://adis38.ru/api_menu.php"
-SITE_SETTINGS_URL = "https://dev.adis38.ru/api_settings.php"  # Для тестового сайта
+SITE_SETTINGS_URL = "https://dev.adis38.ru/api_settings.php"
 SITE_UPLOAD_BOARD_URL = "https://adis38.ru/api_upload_board.php"
 UPLOAD_SECRET = "AdisMenuSecretKey_2026"
 BOT_API_KEY = "adis_secret_bot_key_2026"
 
 # Учётные записи сотрудников и суперадмина
 ADMIN_USERS = {
-    # Главный администратор сети (доступ ко всем филиалам)
     "admin": {
         "password": "11111",
         "branch": "all",
         "role_title": "Главный администратор сети"
     },
-    # Точка 1: Декабрьских Событий
     "decab": {
         "password": "11111",
         "branch": "dekabr",
         "role_title": "Кафе Декабрьских Событий, 78и"
     },
-    # Точка 2: ТЦ Первомайский (Вампилова)
     "pervo": {
         "password": "22222",
         "branch": "vampilova",
         "role_title": "Кафе ТЦ «Первомайский»"
     },
-    # Точка 3: мкр. Берёзовый
     "berez": {
         "password": "33333",
         "branch": "berezovy",
@@ -50,62 +46,157 @@ BRANCHES = {
     "dekabr": {
         "name": "ТД «Антураж» (Декабрьских Событий, 78и)",
         "short": "Декабрьских Событий",
-        "file": "menu_dekabr.json"
+        "file": "menu_dekabr.json",
+        "has_photo_board": True
     },
     "vampilova": {
         "name": "ТЦ «Первомайский» (ул. Вампилова, 2/2)",
         "short": "Первомайский",
-        "file": "menu_vampilova.json"
+        "file": "menu_vampilova.json",
+        "has_photo_board": False
     },
     "berezovy": {
         "name": "мкр. Берёзовый, 131 (р. п. Маркова)",
         "short": "Берёзовый",
-        "file": "menu_berezovy.json"
+        "file": "menu_berezovy.json",
+        "has_photo_board": False
     }
 }
 
-# {uid: {"login": ..., "branch": ..., "role_title": ..., "is_super": bool}}
 authenticated_admins = {}
-
-# {uid: {"state": ..., "main_msg_id": ..., ...}}
 user_states = {}
 
+# ПОЛНЫЙ КАТАЛОГ БЛЮД СЕТИ
 MENU_CATEGORIES = {
-    "bakery": {
+    "buuz": {
+        "title": "🥟 Буузы и наборы",
+        "items": [
+            ("buuz_classic", "Буузы классические", 100),
+            ("buuz_rublen", "Буузы рубленые", 120),
+            ("buuz_fried", "Бууза жареная", 100),
+            ("buuz_xl", "Бууза XL (170г)", 220),
+            ("buuz_malyut", "Буузы малютки (7 шт)", 350),
+            ("buuz_set", "Сет из бууз", 550),
+        ]
+    },
+    "soups": {
+        "title": "🍲 Первые блюда",
+        "items": [
+            ("soup_tomyam", "Том-ям с морепродуктами", 530),
+            ("soup_stepnoy", "Степной с потрохами", 500),
+            ("bukhleor_lamb", "Бухлеор баранина", 500),
+            ("bukhleor_beef", "Бухлеор говядина", 450),
+            ("soup_banshatay", "Баншатай", 360),
+            ("pelm_taiga", "Пельмени по-таежному", 360),
+            ("pelm_classic", "Пельмени", 350),
+            ("soup_lagman", "Лагман", 330),
+            ("soup_solyanka", "Солянка", 320),
+            ("soup_noodle_beef", "Лапша с говядиной", 300),
+            ("soup_borscht", "Борщ со сметаной", 300),
+            ("soup_noodle_chicken", "Лапша куриная", 290),
+        ]
+    },
+    "mains": {
+        "title": "🥘 Вторые блюда",
+        "items": [
+            ("main_mergen", "Обед Мэргэна", 530),
+            ("main_zharekha", "Жареха", 530),
+            ("main_dambar", "Дамбар", 530),
+            ("main_potato_home", "Картофель по-домашнему", 450),
+            ("main_tsuyvan", "Цуйван", 420),
+            ("main_pasta_chicken", "Паста с курицей и грибами", 410),
+            ("main_carbonara", "Паста карбонара", 400),
+            ("main_plov", "Плов с говядиной", 350),
+            ("main_otbivnaya", "Отбивная из свинины", 320),
+            ("main_befstroganov", "Бефстроганов", 300),
+            ("main_vareniki", "Вареники с картофелем", 300),
+            ("main_gulyash", "Гуляш из говядины", 280),
+            ("main_podzharka", "Поджарка из свинины", 280),
+            ("main_gorbusha", "Горбуша в сливках", 280),
+            ("main_liver", "Печень в сливках", 270),
+            ("main_chicken_file", "Куриное филе", 270),
+            ("main_nuggets", "Наггетсы куриные (7 шт)", 260),
+            ("main_kotleta", "Котлета домашняя", 250),
+            ("main_tefteli", "Тефтели (2 шт)", 230),
+            ("main_sosiski_dish", "Сосиски (2 шт)", 220),
+        ]
+    },
+    "salads": {
+        "title": "🥗 Салаты",
+        "items": [
+            ("sal_caesar_salmon", "Цезарь с семгой", 380),
+            ("sal_caesar_chicken", "Цезарь с курицей", 340),
+            ("sal_kochevnik", "Кочевник с языком", 350),
+            ("sal_greek", "Греческий", 280),
+            ("sal_dangina", "Дангина", 280),
+            ("sal_funchoza", "Фунчоза", 260),
+            ("sal_morskoy", "Морской", 260),
+            ("sal_obzhorka", "Обжорка", 250),
+            ("sal_koketka", "Кокетка", 250),
+            ("sal_kapriz", "Каприз", 250),
+            ("sal_nezhnost", "Нежность", 250),
+            ("sal_olivie", "Оливье", 240),
+            ("sal_crab", "Крабовый", 240),
+            ("sal_tomato_cheese", "Помидоры с сыром", 240),
+            ("sal_zakusochny", "Закусочный", 240),
+            ("sal_vegetable", "Овощной", 230),
+            ("sal_beetroot", "Свекла с чесноком", 230),
+            ("sal_carrot_korean", "Морковь по-корейски", 220),
+            ("sal_cabbage_home", "Домашний с капустой", 220),
+        ]
+    },
+    "bakery_hot": {
         "title": "🥟 Выпечка и чебуреки",
         "items": [
+            ("khush_meat_2", "Хушуур с мясом (2 шт)", 280),
+            ("khush_assorti_2", "Хушуур ассорти (2 шт)", 270),
+            ("khush_potato_2", "Хушуур с картофелем (2 шт)", 260),
+            ("cheb_mix_big", "Чебурек микс (180г)", 240),
+            ("cheb_meat_big", "Чебурек с мясом (180г)", 220),
+            ("cheb_cheese_big", "Чебурек с сыром (180г)", 200),
             ("belyash", "Беляш с мясом", 130),
             ("sosiska", "Сосиска в тесте", 100),
-            ("cheb_mix", "Чебурек Mix", 200),
-            ("cheb_meat", "Чебурек с мясом", 150),
-            ("cheb_cheese", "Чебурек с сыром", 150),
-            ("khush_meat", "Хушуур с мясом", 130),
-            ("khush_potato", "Хушуур с картофелем", 100),
+            ("pastry_boovy", "Боовы (130г)", 150),
+            ("pastry_pancakes_2", "Блины (2 шт)", 150),
+            ("cake_basket", "Пирожное корзиночка", 95),
+            ("cake_tube", "Трубочка со сгущенкой", 85),
         ]
     },
-    "pies": {
-        "title": "🥧 Пирожки и ватрушки",
+    "sides": {
+        "title": "🍚 Гарниры",
         "items": [
-            ("pie_apple", "Пирожок с яблоком", 50),
-            ("pie_egg", "Пирожок с яйцом", 50),
-            ("pie_potato", "Пирожок с картошкой", 50),
-            ("pie_cabbage", "Пирожок с капустой", 50),
-            ("pie_liver", "Пирожок с печенью", 50),
-            ("pie_meat", "Пирожок с мясом", 50),
-            ("vat_jam", "Ватрушка с джемом", 50),
-            ("vat_curd", "Ватрушка с творогом", 50),
+            ("side_fries", "Картофель фри", 220),
+            ("side_rice_veg", "Рис с овощами", 140),
+            ("side_puree", "Картофельное пюре", 120),
+            ("side_spaghetti", "Спагетти", 120),
+            ("side_rice", "Рис отварной", 120),
+            ("side_buckwheat", "Гречка", 110),
         ]
     },
-    "pancakes": {
-        "title": "🥞 Блины",
+    "drinks": {
+        "title": "🥤 Напитки",
         "items": [
-            ("panc_milk", "Блин со сгущенкой", 80),
-            ("panc_jam", "Блин с джемом", 80),
-            ("panc_sour", "Блин со сметаной", 80),
-            ("panc_curd", "Блин с творогом", 100),
-            ("panc_ham", "Блин с ветчиной/сыром", 110),
-            ("panc_honey", "Блин с мёдом", 130),
-            ("panc_plain", "Один блин", 25),
+            ("tea_vitam", "Чай Витаминный (800 мл)", 350),
+            ("tea_siberian", "Чай Сибирский (800 мл)", 350),
+            ("mors_brus_1l", "Морс брусника (1 л)", 320),
+            ("kompot_1l", "Компот (1 л)", 320),
+            ("tea_pot_800", "Чайник чая (800 мл)", 230),
+            ("milkshake", "Молочный коктейль", 220),
+            ("mors_cup", "Морс брусника (стакан)", 80),
+            ("kompot_cup", "Компот (стакан)", 80),
+            ("coffee_black", "Кофе черный", 80),
+            ("coffee_3in1", "Кофе 3в1", 70),
+            ("tea_cup", "Чай черный/зеленый", 50),
+        ]
+    },
+    "other": {
+        "title": "🥡 Упаковка и соусы",
+        "items": [
+            ("box_big", "Контейнер большой", 35),
+            ("box_small", "Контейнер маленький", 30),
+            ("bottle", "Бутылка (0.5/1л)", 30),
+            ("bread_ciabatta", "Хлеб чиабатта", 15),
+            ("sauce_portion", "Соусы (майонез/сметана/кетчуп)", 50),
         ]
     }
 }
@@ -128,7 +219,6 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# ==================== УДАЛЕНИЕ СООБЩЕНИЙ ====================
 def safe_delete_message(chat_id, message_id):
     if not message_id:
         return
@@ -137,7 +227,7 @@ def safe_delete_message(chat_id, message_id):
     except Exception:
         pass
 
-# ==================== РАБОТА С JSON НА СЕРВЕРЕ ====================
+# ==================== РАБОТА С JSON ====================
 def get_branch_data(branch_id):
     branch_cfg = BRANCHES.get(branch_id, BRANCHES["dekabr"])
     file_name = branch_cfg["file"]
@@ -192,15 +282,17 @@ def main_menu_kb(branch_id, is_super=False, emergency_data=None):
     
     is_blocked = emergency_data.get("is_blocked", False)
     em_btn_text = "🚨 Режим ЧП: ЗАКРЫТО" if is_blocked else "🚨 Режим ЧП / Стоп-заказ"
+    has_photo = BRANCHES.get(branch_id, {}).get("has_photo_board", True)
 
     kb = telebot.types.InlineKeyboardMarkup()
-    kb.add(telebot.types.InlineKeyboardButton("📸 Обновить фото доски", callback_data="hint_photo"))
+    if has_photo:
+        kb.add(telebot.types.InlineKeyboardButton("📸 Обновить фото доски", callback_data="hint_photo"))
+
     kb.add(telebot.types.InlineKeyboardButton("📢 Объявление филиала", callback_data="manage_announcement"))
     kb.add(telebot.types.InlineKeyboardButton(em_btn_text, callback_data="manage_emergency"))
     kb.add(telebot.types.InlineKeyboardButton("📦 Стоп-лист (Наличие)", callback_data="categories_stock"))
     kb.add(telebot.types.InlineKeyboardButton("💰 Редактор цен", callback_data="categories_price"))
     
-    # Кнопки суперадминистратора
     if is_super:
         kb.add(telebot.types.InlineKeyboardButton("🔄 Сменить филиал управления", callback_data="switch_branch"))
         kb.add(telebot.types.InlineKeyboardButton("🎨 Тема сайта (Оформление)", callback_data="menu_themes"))
@@ -380,7 +472,7 @@ def start_cmd(message):
         return
 
     text = (
-        "🔒 <b>Панель управления сетью «Буузная Адис» v1.3.1</b>\n\n"
+        "🔒 <b>Панель управления сетью «Буузная Адис» v2.2</b>\n\n"
         "Для работы требуется авторизация сотрудника.\n"
         "Введите ваш <b>логин</b>:"
     )
@@ -522,6 +614,12 @@ def handle_photo(message):
         return
 
     branch_id = user_states.get(uid, {}).get("branch", "dekabr")
+    
+    # Защита от загрузки доски на филиалах со статическим меню
+    if not BRANCHES.get(branch_id, {}).get("has_photo_board", True):
+        bot.send_message(chat_id, f"ℹ️ Для филиала «{BRANCHES[branch_id]['short']}» действует постоянное меню, загрузка фото доски не требуется.")
+        return
+
     main_msg_id = user_states.get(uid, {}).get("main_msg_id")
 
     if main_msg_id:
@@ -583,7 +681,6 @@ def handle_callbacks(call):
     state_info = user_states.setdefault(uid, {})
     branch_id = state_info.get("branch") or admin_info.get("branch", "dekabr")
 
-    # ---------- ВЫБОР ФИЛИАЛА ----------
     if data.startswith("select_branch_"):
         b_id = data.replace("select_branch_", "")
         if b_id in BRANCHES:
@@ -601,7 +698,6 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, "Доступ ограничен вашим филиалом", show_alert=True)
         return
 
-    # ---------- УПРАВЛЕНИЕ ОФОРМЛЕНИЕМ САЙТА ----------
     elif data == "menu_themes":
         if admin_info.get("is_super"):
             bot.edit_message_text(
@@ -654,7 +750,6 @@ def handle_callbacks(call):
             show_alert=True
         )
 
-    # ---------- ОБЪЯВЛЕНИЕ ТОЧКИ ----------
     elif data == "manage_announcement":
         bin_data = get_branch_data(branch_id)
         current = bin_data.get("announcement", "")
@@ -696,7 +791,6 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id, "✅ Объявление убрано!", show_alert=True)
         show_dashboard(chat_id, uid, msg_id)
 
-    # ---------- ЧП И СТОП-ЗАКАЗ ----------
     elif data == "manage_emergency":
         state_info["main_msg_id"] = msg_id
         show_emergency_menu(chat_id, msg_id, branch_id)
@@ -751,7 +845,7 @@ def handle_callbacks(call):
     # ---------- СТОП-ЛИСТ ----------
     elif data == "categories_stock":
         bot.edit_message_text(
-            f"📦 <b>Стоп-лист филиала: {BRANCHES[branch_id]['short']}</b>\nВыберите категорию:",
+            f"📦 <b>Стоп-лист филиала: {BRANCHES[branch_id]['short']}</b>\nВыберите категорию блюд:",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -765,7 +859,7 @@ def handle_callbacks(call):
         out_of_stock = bin_data.get("out_of_stock", [])
         cat_title = MENU_CATEGORIES[cat_key]["title"]
         bot.edit_message_text(
-            f"📦 <b>{cat_title} ({BRANCHES[branch_id]['short']})</b>\n\n🟢 — есть в наличии\n🔴 — в стоп-листе:",
+            f"📦 <b>{cat_title} ({BRANCHES[branch_id]['short']})</b>\n\n🟢 — есть в наличии\n🔴 — в стоп-листе (закончилось):",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -780,10 +874,10 @@ def handle_callbacks(call):
 
         if item_id in out_of_stock:
             out_of_stock.remove(item_id)
-            alert_text = "🟢 Блюдо включено"
+            alert_text = "🟢 Блюдо включено (в наличии)"
         else:
             out_of_stock.append(item_id)
-            alert_text = "🔴 Блюдо выключено"
+            alert_text = "🔴 Блюдо выключено (стоп-лист)"
 
         bin_data["out_of_stock"] = out_of_stock
         update_branch_data(branch_id, bin_data)
@@ -812,7 +906,7 @@ def handle_callbacks(call):
         prices = bin_data.get("prices", {})
         cat_title = MENU_CATEGORIES[cat_key]["title"]
         bot.edit_message_text(
-            f"💰 <b>Цены ({BRANCHES[branch_id]['short']}): {cat_title}</b>\nВыберите позицию:",
+            f"💰 <b>Цены ({BRANCHES[branch_id]['short']}): {cat_title}</b>\nВыберите позицию для изменения:",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -830,7 +924,7 @@ def handle_callbacks(call):
         state_info["main_msg_id"] = msg_id
 
         bot.edit_message_text(
-            f"✏️ Введите цену для филиала <b>{BRANCHES[branch_id]['short']}</b>:\n<b>{item_name}</b> (числом, например: <code>150</code>):",
+            f"✏️ Введите новую цену для точки <b>{BRANCHES[branch_id]['short']}</b>:\n<b>{item_name}</b> (числом, например: <code>150</code>):",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
@@ -838,7 +932,6 @@ def handle_callbacks(call):
         )
         bot.answer_callback_query(call.id)
 
-    # ---------- ВЫХОД ----------
     elif data == "menu_logout":
         authenticated_admins.pop(uid, None)
         user_states.pop(uid, None)
@@ -851,7 +944,7 @@ def handle_callbacks(call):
 
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    print("🚀 Запуск мультифилиального бота «Буузная Адис» v1.3.1...")
+    print("🚀 Запуск мультифилиального бота «Буузная Адис» v2.2.1...")
     server_thread = Thread(target=run_web)
     server_thread.daemon = True
     server_thread.start()

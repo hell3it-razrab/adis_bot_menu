@@ -10,10 +10,10 @@ from PIL import Image
 # ==================== НАСТРОЙКИ ====================
 TELEGRAM_BOT_TOKEN = "8712152425:AAFrgtFyLexFis8K6rAxd5CDqXirctVCWp4"
 
-SITE_URL = "https://dev.adis38.ru"
-SITE_API_URL = "https://dev.adis38.ru/api_menu.php"
-SITE_SETTINGS_URL = "https://dev.adis38.ru/api_settings.php"
-SITE_UPLOAD_BOARD_URL = "https://dev.adis38.ru/api_upload_board.php"
+SITE_URL = "https://adis38.ru"
+SITE_API_URL = "https://adis38.ru/api_menu.php"
+SITE_SETTINGS_URL = "https://adis38.ru/api_settings.php"
+SITE_UPLOAD_BOARD_URL = "https://adis38.ru/api_upload_board.php"
 UPLOAD_SECRET = "AdisMenuSecretKey_2026"
 BOT_API_KEY = "adis_secret_bot_key_2026"
 

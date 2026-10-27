@@ -17,7 +17,6 @@ SITE_UPLOAD_BOARD_URL = "https://adis38.ru/api_upload_board.php"
 UPLOAD_SECRET = "AdisMenuSecretKey_2026"
 BOT_API_KEY = "adis_secret_bot_key_2026"
 
-# Учётные записи сотрудников и суперадмина
 ADMIN_USERS = {
     "admin": {
         "password": "11111",
@@ -41,7 +40,6 @@ ADMIN_USERS = {
     }
 }
 
-# Реестр филиалов
 BRANCHES = {
     "dekabr": {
         "name": "ТД «Антураж» (Декабрьских Событий, 78и)",
@@ -63,11 +61,54 @@ BRANCHES = {
     }
 }
 
-authenticated_admins = {}
-user_states = {}
+# 1. МЕНЮ ТОЛЬКО ДЛЯ ДЕКАБРЬСКИХ СОБЫТИЙ (четко под разметку #dekabrBakerySection)
+CATEGORIES_DEKABR = {
+    "dek_hot": {
+        "title": "🔥 Выпечка и сытное",
+        "items": [
+            ("belyash", "Беляш с мясом", 130),
+            ("sosiska", "Сосиска в тесте", 100),
+            ("cheb_mix", "Чебурек Mix (мясо+сыр)", 200),
+            ("cheb_meat", "Чебурек с мясом", 150),
+            ("cheb_cheese", "Чебурек с сыром", 150),
+            ("khush_meat", "Хушуур с мясом", 130),
+            ("khush_potato", "Хушуур с картофелем", 100),
+        ]
+    },
+    "dek_pies": {
+        "title": "🥧 Пирожки",
+        "items": [
+            ("pie_apple", "С яблоком", 50),
+            ("pie_egg", "С яйцом", 50),
+            ("pie_potato", "С картошкой", 50),
+            ("pie_cabbage", "С капустой", 50),
+            ("pie_liver", "С печенью", 50),
+            ("pie_meat", "С мясом", 50),
+        ]
+    },
+    "dek_vatrushki": {
+        "title": "🥯 Ватрушки",
+        "items": [
+            ("vat_jam", "Ватрушка с джемом", 50),
+            ("vat_curd", "Ватрушка с творогом", 50),
+        ]
+    },
+    "dek_pancakes": {
+        "title": "🥞 Блины",
+        "items": [
+            ("panc_milk", "Со сгущенкой", 80),
+            ("panc_jam", "С джемом", 80),
+            ("panc_sour", "Со сметаной", 80),
+            ("panc_curd", "С творогом", 100),
+            ("panc_ham", "Ветчина и сыр", 110),
+            ("panc_honey", "С мёдом", 130),
+            ("panc_plain", "Один блин", 25),
+        ]
+    }
+}
 
-# ПОЛНЫЙ КАТАЛОГ БЛЮД СЕТИ
-MENU_CATEGORIES = {
+# 2. ПОЛНОЕ МЕНЮ ДЛЯ ПЕРВОМАЙСКОГО И БЕРЁЗОВОГО (#staticMenuSection)
+CATEGORIES_STATIC = {
     "buuz": {
         "title": "🥟 Буузы и наборы",
         "items": [
@@ -145,17 +186,15 @@ MENU_CATEGORIES = {
             ("sal_cabbage_home", "Домашний с капустой", 220),
         ]
     },
-    "bakery_hot": {
-        "title": "🥟 Выпечка и чебуреки",
+    "bakery_static": {
+        "title": "🥐 Выпечка и десерты",
         "items": [
             ("khush_meat_2", "Хушуур с мясом (2 шт)", 280),
             ("khush_assorti_2", "Хушуур ассорти (2 шт)", 270),
             ("khush_potato_2", "Хушуур с картофелем (2 шт)", 260),
-            ("cheb_mix_big", "Чебурек микс (180г)", 240),
+            ("cheb_mix_big", "Чебурек Mix (180г)", 240),
             ("cheb_meat_big", "Чебурек с мясом (180г)", 220),
             ("cheb_cheese_big", "Чебурек с сыром (180г)", 200),
-            ("belyash", "Беляш с мясом", 130),
-            ("sosiska", "Сосиска в тесте", 100),
             ("pastry_boovy", "Боовы (130г)", 150),
             ("pastry_pancakes_2", "Блины (2 шт)", 150),
             ("cake_basket", "Пирожное корзиночка", 95),
@@ -185,7 +224,6 @@ MENU_CATEGORIES = {
             ("mors_cup", "Морс брусника (стакан)", 80),
             ("kompot_cup", "Компот (стакан)", 80),
             ("coffee_black", "Кофе черный", 80),
-            ("coffee_3in1", "Кофе 3в1", 70),
             ("tea_cup", "Чай черный/зеленый", 50),
         ]
     },
@@ -200,14 +238,21 @@ MENU_CATEGORIES = {
     }
 }
 
+def get_branch_categories(branch_id):
+    if branch_id == "dekabr":
+        return CATEGORIES_DEKABR
+    return CATEGORIES_STATIC
+
 ALL_ITEMS = {}
-for cat in MENU_CATEGORIES.values():
-    for item_id, name, def_price in cat["items"]:
-        ALL_ITEMS[item_id] = (name, def_price)
+for cat_dict in [CATEGORIES_DEKABR, CATEGORIES_STATIC]:
+    for cat in cat_dict.values():
+        for item_id, name, def_price in cat["items"]:
+            ALL_ITEMS[item_id] = (name, def_price)
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+authenticated_admins = {}
+user_states = {}
 
-# ==================== ВЕБ-СЕРВЕР ДЛЯ RENDER ====================
 app = Flask(__name__)
 
 @app.route('/')
@@ -226,7 +271,6 @@ def safe_delete_message(chat_id, message_id):
     except Exception:
         pass
 
-# ==================== РАБОТА С JSON ====================
 def get_branch_data(branch_id):
     branch_cfg = BRANCHES.get(branch_id, BRANCHES["dekabr"])
     file_name = branch_cfg["file"]
@@ -267,7 +311,6 @@ def update_branch_data(branch_id, data):
         print(f"❌ Ошибка отправки на Beget: {e}")
         return False
 
-# ==================== КЛАВИАТУРЫ ====================
 def branch_select_kb():
     kb = telebot.types.InlineKeyboardMarkup()
     for b_id, b_info in BRANCHES.items():
@@ -333,34 +376,36 @@ def emergency_kb(is_blocked, has_warning):
     kb.add(telebot.types.InlineKeyboardButton("⬅️ В меню филиала", callback_data="back_main"))
     return kb
 
-def categories_kb(mode):
+def categories_kb(mode, branch_id):
     kb = telebot.types.InlineKeyboardMarkup()
-    for cat_key, cat_val in MENU_CATEGORIES.items():
-        kb.add(telebot.types.InlineKeyboardButton(cat_val["title"], callback_data=f"cat_{mode}_{cat_key}"))
+    cats = get_branch_categories(branch_id)
+    for cat_key, cat_val in cats.items():
+        kb.add(telebot.types.InlineKeyboardButton(cat_val["title"], callback_data=f"cat:{mode}:{cat_key}"))
     kb.add(telebot.types.InlineKeyboardButton("⬅️ В меню филиала", callback_data="back_main"))
     return kb
 
-def stock_items_kb(cat_key, out_of_stock):
+def stock_items_kb(cat_key, out_of_stock, branch_id):
     kb = telebot.types.InlineKeyboardMarkup(row_width=2)
     buttons = []
-    for item_id, name, _ in MENU_CATEGORIES[cat_key]["items"]:
+    cats = get_branch_categories(branch_id)
+    for item_id, name, _ in cats.get(cat_key, {}).get("items", []):
         icon = "🔴" if item_id in out_of_stock else "🟢"
-        buttons.append(telebot.types.InlineKeyboardButton(f"{icon} {name}", callback_data=f"toggle_stock_{cat_key}_{item_id}"))
+        buttons.append(telebot.types.InlineKeyboardButton(f"{icon} {name}", callback_data=f"tstock:{cat_key}:{item_id}"))
     kb.add(*buttons)
     kb.add(telebot.types.InlineKeyboardButton("⬅️ Назад к категориям", callback_data="categories_stock"))
     return kb
 
-def price_items_kb(cat_key, current_prices):
+def price_items_kb(cat_key, current_prices, branch_id):
     kb = telebot.types.InlineKeyboardMarkup(row_width=2)
     buttons = []
-    for item_id, name, def_price in MENU_CATEGORIES[cat_key]["items"]:
+    cats = get_branch_categories(branch_id)
+    for item_id, name, def_price in cats.get(cat_key, {}).get("items", []):
         price = current_prices.get(item_id, def_price)
-        buttons.append(telebot.types.InlineKeyboardButton(f"{name}: {price}₽", callback_data=f"edit_price_{cat_key}_{item_id}"))
+        buttons.append(telebot.types.InlineKeyboardButton(f"{name}: {price}₽", callback_data=f"eprice:{cat_key}:{item_id}"))
     kb.add(*buttons)
     kb.add(telebot.types.InlineKeyboardButton("⬅️ Назад к категориям", callback_data="categories_price"))
     return kb
 
-# ==================== ОТОБРАЖЕНИЕ ЭКРАНОВ ====================
 def show_branch_selector(chat_id, user_id, message_id=None):
     text = (
         "🏢 <b>Панель главного администратора</b>\n\n"
@@ -453,7 +498,6 @@ def show_emergency_menu(chat_id, message_id, branch_id):
         reply_markup=emergency_kb(is_blocked, bool(cart_warn))
     )
 
-# ==================== СТАРТ И АВТОРИЗАЦИЯ ====================
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
     uid = message.from_user.id
@@ -471,7 +515,7 @@ def start_cmd(message):
         return
 
     text = (
-        "🔒 <b>Панель управления сетью «Буузная Адис» v2.2</b>\n\n"
+        "🔒 <b>Панель управления сетью «Буузная Адис» v2.6</b>\n\n"
         "Для работы требуется авторизация сотрудника.\n"
         "Введите ваш <b>логин</b>:"
     )
@@ -487,7 +531,6 @@ def start_cmd(message):
     msg = bot.send_message(chat_id, text, parse_mode="HTML")
     user_states[uid] = {"state": "LOGIN", "main_msg_id": msg.message_id}
 
-# ==================== ТЕКСТОВЫЙ ВВОД ====================
 @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("state") in [
     "LOGIN", "PASSWORD", "SET_PRICE", "SET_ANNOUNCEMENT", "SET_BLOCK_REASON", "SET_CART_WARNING"
 ])
@@ -553,7 +596,7 @@ def handle_text_inputs(message):
                 chat_id=chat_id,
                 message_id=main_msg_id,
                 parse_mode="HTML",
-                reply_markup=cancel_input_kb(f"cat_price_{state_info.get('cat_key')}")
+                reply_markup=cancel_input_kb("categories_price")
             )
             return
 
@@ -567,14 +610,15 @@ def handle_text_inputs(message):
         bin_data["prices"] = prices
         update_branch_data(branch_id, bin_data)
 
-        cat_title = MENU_CATEGORIES[cat_key]["title"]
+        cats = get_branch_categories(branch_id)
+        cat_title = cats.get(cat_key, {}).get("title", "Категория")
         user_states[uid]["state"] = None
         bot.edit_message_text(
             f"💰 <b>Цены ({BRANCHES[branch_id]['short']}): {cat_title}</b>\n(Обновлено: {new_price} ₽)\nВыберите позицию:",
             chat_id=chat_id,
             message_id=main_msg_id,
             parse_mode="HTML",
-            reply_markup=price_items_kb(cat_key, prices)
+            reply_markup=price_items_kb(cat_key, prices, branch_id)
         )
 
     elif state == "SET_ANNOUNCEMENT":
@@ -602,7 +646,6 @@ def handle_text_inputs(message):
         user_states[uid]["state"] = None
         show_emergency_menu(chat_id, main_msg_id, branch_id)
 
-# ==================== ЗАГРУЗКА ФОТО ДОСКИ ====================
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     uid = message.from_user.id
@@ -614,7 +657,6 @@ def handle_photo(message):
 
     branch_id = user_states.get(uid, {}).get("branch", "dekabr")
     
-    # Защита от загрузки доски на филиалах со статическим меню
     if not BRANCHES.get(branch_id, {}).get("has_photo_board", True):
         bot.send_message(chat_id, f"ℹ️ Для филиала «{BRANCHES[branch_id]['short']}» действует постоянное меню, загрузка фото доски не требуется.")
         return
@@ -664,7 +706,6 @@ def handle_photo(message):
 
     show_dashboard(chat_id, uid, main_msg_id)
 
-# ==================== ОБРАБОТКА CALLBACK ====================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     uid = call.from_user.id
@@ -841,33 +882,34 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id, "✅ Предупреждение снято!", show_alert=True)
         show_emergency_menu(chat_id, msg_id, branch_id)
 
-    # ---------- СТОП-ЛИСТ ----------
+    # ---------- СТОП-ЛИСТ (ИСПРАВЛЕНО ДЛЯ ВСЕХ ТОЧЕК) ----------
     elif data == "categories_stock":
         bot.edit_message_text(
             f"📦 <b>Стоп-лист филиала: {BRANCHES[branch_id]['short']}</b>\nВыберите категорию блюд:",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
-            reply_markup=categories_kb("stock")
+            reply_markup=categories_kb("stock", branch_id)
         )
         bot.answer_callback_query(call.id)
 
-    elif data.startswith("cat_stock_"):
-        cat_key = data.replace("cat_stock_", "")
+    elif data.startswith("cat:stock:"):
+        cat_key = data.replace("cat:stock:", "")
         bin_data = get_branch_data(branch_id)
         out_of_stock = bin_data.get("out_of_stock", [])
-        cat_title = MENU_CATEGORIES[cat_key]["title"]
+        cats = get_branch_categories(branch_id)
+        cat_title = cats.get(cat_key, {}).get("title", "Категория")
         bot.edit_message_text(
             f"📦 <b>{cat_title} ({BRANCHES[branch_id]['short']})</b>\n\n🟢 — есть в наличии\n🔴 — в стоп-листе (закончилось):",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
-            reply_markup=stock_items_kb(cat_key, out_of_stock)
+            reply_markup=stock_items_kb(cat_key, out_of_stock, branch_id)
         )
         bot.answer_callback_query(call.id)
 
-    elif data.startswith("toggle_stock_"):
-        _, _, cat_key, item_id = data.split("_", 3)
+    elif data.startswith("tstock:"):
+        _, cat_key, item_id = data.split(":", 2)
         bin_data = get_branch_data(branch_id)
         out_of_stock = bin_data.get("out_of_stock", [])
 
@@ -884,7 +926,7 @@ def handle_callbacks(call):
         bot.edit_message_reply_markup(
             chat_id=chat_id,
             message_id=msg_id,
-            reply_markup=stock_items_kb(cat_key, out_of_stock)
+            reply_markup=stock_items_kb(cat_key, out_of_stock, branch_id)
         )
         bot.answer_callback_query(call.id, alert_text)
 
@@ -895,26 +937,27 @@ def handle_callbacks(call):
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
-            reply_markup=categories_kb("price")
+            reply_markup=categories_kb("price", branch_id)
         )
         bot.answer_callback_query(call.id)
 
-    elif data.startswith("cat_price_"):
-        cat_key = data.replace("cat_price_", "")
+    elif data.startswith("cat:price:"):
+        cat_key = data.replace("cat:price:", "")
         bin_data = get_branch_data(branch_id)
         prices = bin_data.get("prices", {})
-        cat_title = MENU_CATEGORIES[cat_key]["title"]
+        cats = get_branch_categories(branch_id)
+        cat_title = cats.get(cat_key, {}).get("title", "Категория")
         bot.edit_message_text(
             f"💰 <b>Цены ({BRANCHES[branch_id]['short']}): {cat_title}</b>\nВыберите позицию для изменения:",
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
-            reply_markup=price_items_kb(cat_key, prices)
+            reply_markup=price_items_kb(cat_key, prices, branch_id)
         )
         bot.answer_callback_query(call.id)
 
-    elif data.startswith("edit_price_"):
-        _, _, cat_key, item_id = data.split("_", 3)
+    elif data.startswith("eprice:"):
+        _, cat_key, item_id = data.split(":", 2)
         item_name = ALL_ITEMS.get(item_id, (item_id, 0))[0]
 
         state_info["state"] = "SET_PRICE"
@@ -927,7 +970,7 @@ def handle_callbacks(call):
             chat_id=chat_id,
             message_id=msg_id,
             parse_mode="HTML",
-            reply_markup=cancel_input_kb(f"cat_price_{cat_key}")
+            reply_markup=cancel_input_kb("categories_price")
         )
         bot.answer_callback_query(call.id)
 
@@ -941,9 +984,8 @@ def handle_callbacks(call):
         )
         bot.answer_callback_query(call.id)
 
-# ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    print("🚀 Запуск мультифилиального бота «Буузная Адис» v2.2.1...")
+    print("🚀 Запуск мультифилиального бота «Буузная Адис» v2.6.0...")
     server_thread = Thread(target=run_web)
     server_thread.daemon = True
     server_thread.start()
